@@ -54,6 +54,8 @@ jobs:
       - name: Build a release if the published one is behind
         env:
           GH_TOKEN: ${{ github.token }}
+          # The previous step adds an "upstream" remote, and gh would otherwise target yuliskov/SmartTube.
+          GH_REPO: ${{ github.repository }}
         # Compares against what's actually published, so a rerun recovers if an earlier build never started.
         # Pushes made with GITHUB_TOKEN don't trigger workflows, so start the build explicitly.
         run: |
