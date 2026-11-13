@@ -1,6 +1,8 @@
 package com.liskovsoft.smartyoutubetv2.common.declickbait;
 
 import android.app.Activity;
+import android.os.Handler;
+import android.os.Looper;
 
 import androidx.core.content.ContextCompat;
 
@@ -39,7 +41,6 @@ public class DeclickbaitController extends BasePlayerController {
     private DeclickbaitOverlay mOverlay;
     private MediaItemMetadata mMetadata;
     private VideoGroup mMomentsGroup;
-    private boolean mWasPlaying;
     /** Video the background work is for, and how far it's got (shown again if the overlay is re-opened). */
     private String mWorkVideoId;
     private String mTranscriptStatus;
@@ -55,9 +56,29 @@ public class DeclickbaitController extends BasePlayerController {
     public void onNewVideo(Video item) {
         cancel();
         mMetadata = null;
-        // SuggestionsController clears every suggestion row (ours included) when the new video's
-        // metadata arrives. Removing it here as well crashed the app mid-transition on the bedroom stick.
+        removeMomentsRowLater();
+    }
+
+    /**
+     * The previous video's moments must not stay usable on the next one. SuggestionsController usually clears all
+     * rows, but keeps them when suggestions are open. Removing synchronously here crashed mid-transition on the
+     * bedroom stick, so remove on the next loop, only if the row is still there, and never let it throw.
+     */
+    private void removeMomentsRowLater() {
+        final VideoGroup group = mMomentsGroup;
         mMomentsGroup = null;
+        if (group == null) {
+            return;
+        }
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                if (getPlayer() != null && getPlayer().getSuggestionsIndex(group) >= 0) {
+                    getPlayer().removeSuggestions(group);
+                }
+            } catch (RuntimeException e) {
+                Log.e(TAG, "Removing Key moments row failed: %s", e);
+            }
+        });
     }
 
     @Override
@@ -116,23 +137,28 @@ public class DeclickbaitController extends BasePlayerController {
             cancelWork();
         }
 
-        mWasPlaying = getPlayer().getPlayWhenReady();
+        // Per-overlay state: dismiss callbacks are queued, so an old overlay's callback can run after a new one opened.
+        final boolean wasPlaying = getPlayer().getPlayWhenReady();
+        final DeclickbaitOverlay[] self = new DeclickbaitOverlay[1];
         getPlayer().setPlayWhenReady(false);
         getPlayer().showControls(false);
 
-        mOverlay = DeclickbaitOverlay.show(activity, video.getTitle(), mPrefs.isGuessFirst(), new DeclickbaitOverlay.Listener() {
+        self[0] = DeclickbaitOverlay.show(activity, video.getTitle(), mPrefs.isGuessFirst(), new DeclickbaitOverlay.Listener() {
             @Override
             public void onJump(long positionMs) {
-                if (getPlayer() != null) {
+                if (getPlayer() != null && isCurrentVideo(videoId)) {
                     getPlayer().setPositionMs(Math.min(positionMs, getPlayer().getDurationMs()));
                     getPlayer().setPlayWhenReady(true);
                 }
             }
 
             @Override
-            public void onClosed(boolean jumped) {
-                mOverlay = null;
-                if (!jumped && mWasPlaying && getPlayer() != null) {
+            public void onClosed(boolean userClosed) {
+                if (mOverlay == self[0]) {
+                    mOverlay = null;
+                }
+                // Resume only after the person closes it, on the same video; not when SmartTube tore it down.
+                if (userClosed && wasPlaying && getPlayer() != null && isCurrentVideo(videoId)) {
                     getPlayer().setPlayWhenReady(true);
                 }
             }
@@ -157,6 +183,7 @@ public class DeclickbaitController extends BasePlayerController {
                 }
             }
         });
+        mOverlay = self[0];
 
         if (!mPrefs.hasApiKey()) {
             mOverlay.setError("Add your Claude API key in Settings → De-clickbait first.", true);
@@ -191,9 +218,13 @@ public class DeclickbaitController extends BasePlayerController {
         return videoId.equals(mWorkVideoId) && RxHelper.isAnyActionRunning(mFormatAction, mTranscriptAction, mClaudeAction);
     }
 
-    private boolean isOverlayFor(String videoId) {
+    private boolean isCurrentVideo(String videoId) {
         Video video = getVideo();
-        return mOverlay != null && mOverlay.isShowing() && video != null && videoId.equals(video.videoId);
+        return video != null && videoId.equals(video.videoId);
+    }
+
+    private boolean isOverlayFor(String videoId) {
+        return mOverlay != null && mOverlay.isShowing() && isCurrentVideo(videoId);
     }
 
     private void setTranscriptStatus(String text, boolean done) {
@@ -205,16 +236,23 @@ public class DeclickbaitController extends BasePlayerController {
     }
 
     private void onFormatInfo(String videoId, MediaItemFormatInfo formatInfo) {
-        final String url = TranscriptFetcher.pickUrl(formatInfo.getSubtitles());
-        if (url == null) {
-            fail("This video has no captions, so there's nothing to read.", false, null);
-            return;
-        }
-        mTranscriptAction = RxHelper.fromCallable(() -> TranscriptFetcher.fetch(url)).subscribe(
+        final List<com.liskovsoft.mediaserviceinterfaces.data.MediaSubtitle> subtitles = formatInfo.getSubtitles();
+        // Long-running scheduler: the token-free fallback makes extra YouTube requests.
+        mTranscriptAction = RxHelper.<Transcript>createLong(emitter -> {
+            try {
+                emitter.onNext(TranscriptFetcher.fetchForVideo(videoId, subtitles));
+                emitter.onComplete();
+            } catch (TranscriptFetcher.FetchException e) {
+                emitter.tryOnError(e);
+            }
+        }).subscribe(
                 transcript -> onTranscript(videoId, transcript),
-                error -> fail("Couldn't download the captions ("
-                        + (error instanceof TranscriptFetcher.FetchException ? error.getMessage() : error.getClass().getSimpleName())
-                        + ").", false, error)
+                error -> {
+                    String reason = error instanceof TranscriptFetcher.FetchException ? error.getMessage() : error.getClass().getSimpleName();
+                    fail("no caption tracks".equals(reason)
+                            ? "This video has no captions, so there's nothing to read."
+                            : "Couldn't download the captions (" + reason + ").", false, error);
+                }
         );
     }
 
@@ -291,11 +329,12 @@ public class DeclickbaitController extends BasePlayerController {
         mWorkVideoId = null;
     }
 
+    /** Takes the overlay down without resuming playback (new video, engine released, player closed). */
     private void dismissOverlay() {
         if (mOverlay != null) {
             DeclickbaitOverlay overlay = mOverlay;
             mOverlay = null;
-            overlay.dismiss();
+            overlay.dismissQuietly();
         }
     }
 

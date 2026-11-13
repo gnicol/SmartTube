@@ -61,9 +61,24 @@ public class DeclickbaitPrefs {
         return mApiKey != null && !mApiKey.isEmpty();
     }
 
-    public synchronized void setApiKey(String apiKey) {
-        mApiKey = apiKey != null ? apiKey.trim() : null;
+    /**
+     * Saves the key with any whitespace removed (pasting can add spaces or line breaks).
+     *
+     * @return false, without saving, if what's left doesn't look like an API key
+     */
+    public synchronized boolean setApiKey(String apiKey) {
+        String cleaned = apiKey != null ? apiKey.replaceAll("\\s+", "") : "";
+        if (!cleaned.isEmpty() && !isWellFormedKey(cleaned)) {
+            return false;
+        }
+        mApiKey = cleaned.isEmpty() ? null : cleaned;
         save();
+        return true;
+    }
+
+    /** Claude API keys are ASCII letters, digits, '-' and '_'. Anything else can't go in an HTTP header. */
+    public static boolean isWellFormedKey(String key) {
+        return key != null && key.matches("[A-Za-z0-9_-]{20,300}");
     }
 
     /** "…x7Qa", or null when no key is set. */

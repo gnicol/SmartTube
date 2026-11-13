@@ -22,7 +22,8 @@ import com.liskovsoft.smartyoutubetv2.common.R;
 public class DeclickbaitOverlay {
     public interface Listener {
         void onJump(long positionMs);
-        void onClosed(boolean jumped);
+        /** @param userClosed closed with Back / Close / Not now (not by a jump, Settings, or the app tearing it down) */
+        void onClosed(boolean userClosed);
         void onOpenSettings();
         void onRevealed(DeclickbaitResult result);
     }
@@ -44,7 +45,8 @@ public class DeclickbaitOverlay {
     private final Button mSettingsButton;
     private final Button mCloseButton;
     private DeclickbaitResult mResult;
-    private boolean mJumped;
+    /** Set when the overlay closes for a reason other than the person dismissing it. */
+    private boolean mQuiet;
 
     private DeclickbaitOverlay(Activity activity, String videoTitle, boolean guessFirst, Listener listener) {
         mActivity = activity;
@@ -55,7 +57,7 @@ public class DeclickbaitOverlay {
         View root = LayoutInflater.from(activity).inflate(R.layout.declickbait_overlay, null);
         mDialog.setContentView(root);
         mDialog.setCancelable(true);
-        mDialog.setOnDismissListener(dialog -> mListener.onClosed(mJumped));
+        mDialog.setOnDismissListener(dialog -> mListener.onClosed(!mQuiet));
 
         mGuessPanel = root.findViewById(R.id.declickbait_guess_panel);
         mAnswerPanel = root.findViewById(R.id.declickbait_answer_panel);
@@ -81,7 +83,7 @@ public class DeclickbaitOverlay {
         mRevealButton.setOnClickListener(v -> reveal());
         mCloseButton.setOnClickListener(v -> dismiss());
         mSettingsButton.setOnClickListener(v -> {
-            dismiss();
+            dismissQuietly();
             mListener.onOpenSettings();
         });
     }
@@ -98,9 +100,20 @@ public class DeclickbaitOverlay {
     }
 
     public void dismiss() {
-        if (mDialog.isShowing() && !mActivity.isFinishing()) {
-            mDialog.dismiss();
+        // Dismiss even while the activity finishes, or the window leaks.
+        if (mDialog.isShowing()) {
+            try {
+                mDialog.dismiss();
+            } catch (IllegalArgumentException e) {
+                // Window already detached from the activity.
+            }
         }
+    }
+
+    /** Close without counting as the person dismissing it, so playback isn't resumed. */
+    public void dismissQuietly() {
+        mQuiet = true;
+        dismiss();
     }
 
     /** First status line: reading the transcript. */
@@ -217,8 +230,7 @@ public class DeclickbaitOverlay {
         row.addView(time);
         row.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         row.setOnClickListener(v -> {
-            mJumped = true;
-            dismiss();
+            dismissQuietly();
             mListener.onJump(ms);
         });
 

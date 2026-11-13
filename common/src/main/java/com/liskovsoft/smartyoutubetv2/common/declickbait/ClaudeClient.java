@@ -1,7 +1,6 @@
 package com.liskovsoft.smartyoutubetv2.common.declickbait;
 
 import com.liskovsoft.sharedutils.mylogger.Log;
-import com.liskovsoft.sharedutils.okhttp.OkHttpManager;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -190,9 +189,14 @@ public class ClaudeClient {
         }
     }
 
+    /**
+     * A dedicated client, not SmartTube's shared one: that one trusts every certificate on Android 7.0 and older
+     * and can carry logging interceptors, neither of which is acceptable for a request holding the API key.
+     */
     private static synchronized OkHttpClient client() {
         if (sClient == null) {
-            sClient = OkHttpManager.instance().getClient().newBuilder()
+            sClient = new OkHttpClient.Builder()
+                    .connectTimeout(20, TimeUnit.SECONDS)
                     .readTimeout(90, TimeUnit.SECONDS)
                     .writeTimeout(30, TimeUnit.SECONDS)
                     .build();
@@ -200,10 +204,19 @@ public class ClaudeClient {
         return sClient;
     }
 
+    /** The key as a header value, or a ClaudeException that never echoes the key (OkHttp's own error would). */
+    private static String keyHeader(DeclickbaitPrefs prefs) throws ClaudeException {
+        String key = prefs.getApiKey();
+        if (!DeclickbaitPrefs.isWellFormedKey(key)) {
+            throw new ClaudeException("The saved API key isn't valid. Re-enter it in Settings → De-clickbait.", true);
+        }
+        return key;
+    }
+
     private static JSONObject post(DeclickbaitPrefs prefs, JSONObject body) throws ClaudeException, ImageException, JSONException {
         Request.Builder request = new Request.Builder()
                 .url(URL)
-                .header("x-api-key", prefs.getApiKey())
+                .header("x-api-key", keyHeader(prefs))
                 .header("anthropic-version", API_VERSION)
                 .post(RequestBody.create(JSON, body.toString()));
         if (usesFallbacks(prefs)) {
@@ -296,7 +309,7 @@ public class ClaudeClient {
                     .put("messages", new JSONArray().put(new JSONObject().put("role", "user").put("content", "Reply with OK.")));
             Request request = new Request.Builder()
                     .url(URL)
-                    .header("x-api-key", prefs.getApiKey())
+                    .header("x-api-key", keyHeader(prefs))
                     .header("anthropic-version", API_VERSION)
                     .post(RequestBody.create(JSON, body.toString()))
                     .build();
@@ -311,6 +324,8 @@ public class ClaudeClient {
                 }
                 return "Error " + response.code() + (msg.isEmpty() ? "" : ": " + msg);
             }
+        } catch (ClaudeException e) {
+            return e.getMessage();
         } catch (IOException e) {
             return "Couldn't reach Claude. Check the internet connection.";
         } catch (JSONException e) {

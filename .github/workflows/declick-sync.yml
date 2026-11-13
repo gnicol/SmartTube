@@ -33,16 +33,25 @@ jobs:
           git fetch upstream master
           if git merge-base --is-ancestor upstream/master HEAD; then
             echo "Already up to date with upstream."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          else
+            git rebase upstream/master
+            git push --force-with-lease origin HEAD:declickbait
           fi
-          git rebase upstream/master
-          git push --force-with-lease origin HEAD:declickbait
-          echo "changed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Build the new release
-        if: steps.rebase.outputs.changed == 'true'
+      - name: Build a release if the published one is behind
         env:
           GH_TOKEN: ${{ github.token }}
+        # Compares against what's actually published, so a rerun recovers if an earlier build never started.
         # Pushes made with GITHUB_TOKEN don't trigger workflows, so start the build explicitly.
-        run: gh workflow run declick-build.yml --ref declickbait
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          PUBLISHED="$(gh release view latest-declick --json body --jq .body 2>/dev/null | grep -oE '[0-9a-f]{40}' | tail -1 || true)"
+          if [ "$PUBLISHED" = "$HEAD_SHA" ]; then
+            echo "Release already built from $HEAD_SHA."
+          elif gh run list --workflow declick-build.yml --branch declickbait --json headSha,status \
+                 --jq ".[] | select(.headSha == \"$HEAD_SHA\" and .status != \"completed\")" | grep -q .; then
+            echo "A release build for $HEAD_SHA is already running."
+          else
+            gh workflow run declick-build.yml --ref declickbait
+          fi

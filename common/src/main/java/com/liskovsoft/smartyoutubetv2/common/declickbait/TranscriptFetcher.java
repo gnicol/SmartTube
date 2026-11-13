@@ -3,9 +3,13 @@ package com.liskovsoft.smartyoutubetv2.common.declickbait;
 import androidx.annotation.Nullable;
 
 import com.liskovsoft.googlecommon.common.helpers.DefaultHeaders;
+import com.liskovsoft.mediaserviceinterfaces.data.MediaItemFormatInfo;
 import com.liskovsoft.mediaserviceinterfaces.data.MediaSubtitle;
 import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.sharedutils.okhttp.OkHttpManager;
+import com.liskovsoft.youtubeapi.common.helpers.AppClient;
+import com.liskovsoft.youtubeapi.service.data.YouTubeMediaItemFormatInfo;
+import com.liskovsoft.youtubeapi.videoinfo.V2.VideoInfoService;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -13,29 +17,94 @@ import org.json.JSONObject;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 
 /**
- * Downloads a video's captions as text. Uses the same caption URLs SmartTube already plays
- * (they carry the PO token), asking YouTube for json3 and falling back to the WebVTT it serves by default.
+ * Downloads a video's captions as text.
+ * <p>
+ * First uses the caption tracks SmartTube already has for playback. Their URLs can need a PO token, which some
+ * devices (e.g. Fire OS 6) can't produce: YouTube then answers 200 with an empty body and even the built-in
+ * player fails. So when that comes back empty, ask YouTube's visionOS and Android VR clients for the tracks,
+ * whose caption URLs work without a token.
  */
 public class TranscriptFetcher {
     private static final String TAG = TranscriptFetcher.class.getSimpleName();
     private static final Pattern VTT_TIME = Pattern.compile("^(\\d+:)?(\\d{2}):(\\d{2})\\.(\\d{3})\\s+-->");
     private static final Pattern VTT_TAG = Pattern.compile("<[^>]+>");
 
+    /** Why the captions couldn't be read, short enough to show on the TV. */
+    public static class FetchException extends Exception {
+        FetchException(String reason) {
+            super(reason);
+        }
+    }
+
+    /**
+     * Blocking. Tries the playback tracks, then tracks from token-free clients.
+     *
+     * @param primary the subtitles from the format info SmartTube loaded (may be null)
+     */
+    public static Transcript fetchForVideo(String videoId, @Nullable List<MediaSubtitle> primary) throws FetchException {
+        Set<String> reasons = new LinkedHashSet<>();
+        Set<String> tried = new LinkedHashSet<>();
+
+        String url = pickUrl(primary);
+        if (url == null) {
+            reasons.add("no caption tracks");
+        } else {
+            tried.add(url);
+            try {
+                return fetch(url);
+            } catch (FetchException e) {
+                reasons.add(e.getMessage());
+            }
+        }
+
+        // AppClient is Kotlin-internal to MediaServiceCore, but public at the JVM level.
+        for (AppClient client : new AppClient[] {AppClient.VISIONOS, AppClient.ANDROID_VR}) {
+            List<MediaSubtitle> subs = subtitlesFrom(client, videoId);
+            String altUrl = pickUrl(subs);
+            if (altUrl == null || tried.contains(altUrl)) {
+                continue;
+            }
+            tried.add(altUrl);
+            try {
+                Transcript t = fetch(altUrl);
+                Log.w(TAG, "captions came from the %s client", client.name());
+                return t;
+            } catch (FetchException e) {
+                reasons.add(client.name().toLowerCase() + ": " + e.getMessage());
+            }
+        }
+
+        throw new FetchException(join(reasons));
+    }
+
+    @Nullable
+    private static List<MediaSubtitle> subtitlesFrom(AppClient client, String videoId) {
+        try {
+            MediaItemFormatInfo info = YouTubeMediaItemFormatInfo.from(VideoInfoService.instance().getVideoInfo(client, videoId, null));
+            return info != null ? info.getSubtitles() : null;
+        } catch (Exception e) {
+            Log.w(TAG, "%s client: %s", client.name(), e);
+            return null;
+        }
+    }
+
     /** Choose English captions: manual first, then auto-generated, then a translation to English, then anything. */
     @Nullable
-    public static String pickUrl(@Nullable List<MediaSubtitle> subtitles) {
+    static String pickUrl(@Nullable List<MediaSubtitle> subtitles) {
         if (subtitles == null || subtitles.isEmpty()) {
-            Log.w(TAG, "no caption tracks");
             return null;
         }
 
@@ -70,7 +139,7 @@ public class TranscriptFetcher {
 
         if (manualEn != null) return manualEn.getBaseUrl();
         if (autoEn != null) return autoEn.getBaseUrl();
-        if (translatable != null) return translatable.getBaseUrl() + "&tlang=en";
+        if (translatable != null) return withParam(translatable.getBaseUrl(), "tlang", "en");
 
         for (MediaSubtitle sub : subtitles) {
             if (sub.getBaseUrl() != null) {
@@ -80,18 +149,11 @@ public class TranscriptFetcher {
         return null;
     }
 
-    /** Why the captions couldn't be read, short enough to show on the TV. */
-    public static class FetchException extends Exception {
-        FetchException(String reason) {
-            super(reason);
-        }
-    }
-
     /**
      * Blocking. Tries json3 then WebVTT (what the player uses) on the URL as given, then the same without the
-     * PO token: older devices can get a token YouTube rejects, while the signed URL works without one.
+     * PO token params.
      */
-    public static Transcript fetch(String baseUrl) throws FetchException {
+    static Transcript fetch(String baseUrl) throws FetchException {
         OkHttpClient client = OkHttpManager.instance().getClient();
         List<String> bases = new ArrayList<>();
         bases.add(baseUrl);
@@ -100,30 +162,48 @@ public class TranscriptFetcher {
             bases.add(noToken);
         }
 
-        String reason = "no response";
+        Set<String> reasons = new LinkedHashSet<>();
         for (String base : bases) {
             for (String fmt : new String[] {"json3", "vtt"}) {
-                Download d = downloadWithRetry(client, withFormat(base, fmt));
+                Download d = downloadWithRetry(client, withParam(base, "fmt", fmt));
                 if (d.text == null) {
-                    reason = d.reason;
+                    reasons.add(d.reason);
                     continue;
                 }
                 Transcript t = "json3".equals(fmt) ? parseJson3(d.text) : parseVtt(d.text);
                 if (t != null && !t.isEmpty()) {
                     return t;
                 }
-                reason = d.text.trim().isEmpty() ? "empty response" : "unreadable response";
+                reasons.add(d.text.trim().isEmpty() ? "empty response" : "unreadable response");
             }
         }
-        throw new FetchException(reason);
+        throw new FetchException(join(reasons));
+    }
+
+    static String withParam(String url, String name, String value) {
+        HttpUrl parsed = HttpUrl.parse(url);
+        return parsed != null ? parsed.newBuilder().setQueryParameter(name, value).build().toString() : url;
     }
 
     static String withoutParams(String url, String... names) {
-        String result = url;
-        for (String name : names) {
-            result = result.replaceAll("([?&])" + name + "=[^&]*&?", "$1");
+        HttpUrl parsed = HttpUrl.parse(url);
+        if (parsed == null) {
+            return url;
         }
-        return result.replaceAll("[?&]$", "");
+        HttpUrl.Builder builder = parsed.newBuilder();
+        for (String name : names) {
+            builder.removeAllQueryParameters(name);
+        }
+        return builder.build().toString();
+    }
+
+    private static String join(Set<String> reasons) {
+        StringBuilder sb = new StringBuilder();
+        for (String r : reasons) {
+            if (sb.length() > 0) sb.append("; ");
+            sb.append(r);
+        }
+        return sb.length() > 0 ? sb.toString() : "no response";
     }
 
     private static class Download {
@@ -150,13 +230,6 @@ public class TranscriptFetcher {
         return d;
     }
 
-    static String withFormat(String url, String fmt) {
-        if (url.matches(".*[?&]fmt=[^&]*.*")) {
-            return url.replaceAll("([?&])fmt=[^&]*", "$1fmt=" + fmt);
-        }
-        return url + (url.contains("?") ? "&" : "?") + "fmt=" + fmt;
-    }
-
     private static Download download(OkHttpClient client, String url) {
         // Same User-Agent the player uses for media and subtitle requests.
         Request request = new Request.Builder().url(url).header("User-Agent", DefaultHeaders.APP_USER_AGENT).get().build();
@@ -175,17 +248,15 @@ public class TranscriptFetcher {
 
     /** Host, path and parameter names only (values include signatures and tokens). */
     private static String describe(String url) {
-        int q = url.indexOf('?');
-        if (q < 0) {
-            return url;
+        HttpUrl parsed = HttpUrl.parse(url);
+        if (parsed == null) {
+            return "(bad url)";
         }
-        StringBuilder sb = new StringBuilder(url.substring(0, q)).append(" [");
-        for (String pair : url.substring(q + 1).split("&")) {
-            int eq = pair.indexOf('=');
-            String name = eq >= 0 ? pair.substring(0, eq) : pair;
+        StringBuilder sb = new StringBuilder(parsed.host()).append(parsed.encodedPath()).append(" [");
+        for (String name : parsed.queryParameterNames()) {
             sb.append(name);
             if (name.equals("fmt") || name.equals("lang") || name.equals("kind") || name.equals("c") || name.equals("tlang")) {
-                sb.append('=').append(eq >= 0 ? pair.substring(eq + 1) : "");
+                sb.append('=').append(parsed.queryParameter(name));
             }
             sb.append(' ');
         }
@@ -224,34 +295,48 @@ public class TranscriptFetcher {
         }
     }
 
+    /**
+     * WebVTT: a cue is a timing line plus the text lines up to the next blank line. Cue identifiers, NOTE and STYLE
+     * blocks are skipped. YouTube's rolling auto-captions repeat the previous cue's lines, so those are dropped.
+     */
     @Nullable
     static Transcript parseVtt(@Nullable String content) {
         if (content == null || !content.startsWith("WEBVTT")) {
             return null;
         }
         Transcript.Builder builder = new Transcript.Builder(null);
-        String[] lines = content.split("\r?\n");
+        List<String> previous = new ArrayList<>();
+        List<String> current = null;
         long cueStart = -1;
-        StringBuilder cueText = new StringBuilder();
 
-        for (String line : lines) {
+        String[] lines = content.split("\r?\n", -1);
+        for (int i = 0; i <= lines.length; i++) {
+            String line = i < lines.length ? lines[i] : "";
             Matcher m = VTT_TIME.matcher(line);
             if (m.find()) {
-                if (cueStart >= 0) {
-                    builder.addCue(cueStart, cueText.toString());
-                }
                 long h = m.group(1) != null ? Long.parseLong(m.group(1).replace(":", "")) : 0;
                 cueStart = ((h * 60 + Long.parseLong(m.group(2))) * 60 + Long.parseLong(m.group(3))) * 1000
                         + Long.parseLong(m.group(4));
-                cueText.setLength(0);
-            } else if (cueStart >= 0 && !line.trim().isEmpty()) {
-                // Rolling auto-captions: keep only the newest line of each cue.
-                cueText.setLength(0);
-                cueText.append(VTT_TAG.matcher(line).replaceAll("").trim());
+                current = new ArrayList<>();
+            } else if (current != null && !line.trim().isEmpty()) {
+                String text = VTT_TAG.matcher(line).replaceAll("").trim();
+                if (!text.isEmpty()) {
+                    current.add(text);
+                }
+            } else if (current != null) { // blank line or end: the cue is complete
+                StringBuilder fresh = new StringBuilder();
+                for (String text : current) {
+                    if (!previous.contains(text)) {
+                        if (fresh.length() > 0) fresh.append(' ');
+                        fresh.append(text);
+                    }
+                }
+                builder.addCue(cueStart, fresh.toString());
+                if (!current.isEmpty()) {
+                    previous = current;
+                }
+                current = null;
             }
-        }
-        if (cueStart >= 0) {
-            builder.addCue(cueStart, cueText.toString());
         }
         return builder.build();
     }

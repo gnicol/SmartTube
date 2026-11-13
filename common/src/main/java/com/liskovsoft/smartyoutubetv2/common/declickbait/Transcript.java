@@ -68,9 +68,11 @@ public class Transcript {
         if (ms < 0) {
             return -1;
         }
+        // Stamps are whole seconds (formatTime truncates), so "0:11" names a line starting anywhere in 11.000–11.999 s.
+        long endOfSecond = ms + 999;
         long best = mLines.isEmpty() ? ms : mLines.get(0).startMs;
         for (Line line : mLines) {
-            if (line.startMs <= ms) {
+            if (line.startMs <= endOfSecond) {
                 best = line.startMs;
             } else {
                 break;
@@ -129,6 +131,11 @@ public class Transcript {
             }
             mLastCue = clean;
 
+            // A cue that starts a group-length after the current line begins its own line, so every line's stamp
+            // is within GROUP_MS of the words in it (appending first would label it up to a gap too early).
+            if (mStartMs >= 0 && startMs - mStartMs >= GROUP_MS) {
+                flush();
+            }
             if (mStartMs < 0) {
                 mStartMs = startMs;
             }
@@ -136,10 +143,6 @@ public class Transcript {
                 mBuf.append(' ');
             }
             mBuf.append(clean);
-
-            if (startMs - mStartMs >= GROUP_MS) {
-                flush();
-            }
         }
 
         private void flush() {

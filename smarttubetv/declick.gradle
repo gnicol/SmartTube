@@ -37,12 +37,16 @@ android {
 }
 
 // The in-app updater compares versionCode, so fork-only releases need their own numbers:
-// upstream code × 100 + CI build counter (DECLICK_BUILD_NUMBER). Stays increasing across upstream bumps.
+// upstream code × 10000 + CI build counter (DECLICK_BUILD_NUMBER), with no wrap-around, so it only ever increases
+// (2464 → 24,640,000 + run). Local builds default to run 0, below anything CI publishes.
 def declickBuildNumber = (declickEnv['DECLICK_BUILD_NUMBER'] ?: '0') as int
+if (declickBuildNumber >= 10000) {
+    throw new GradleException("DECLICK_BUILD_NUMBER $declickBuildNumber needs a wider versionCode scheme")
+}
 android.applicationVariants.all { variant ->
     if (variant.buildType.name == 'declick') {
         variant.outputs.all { output ->
-            output.versionCodeOverride = variant.versionCode * 100 + (declickBuildNumber % 100)
+            output.versionCodeOverride = variant.versionCode * 10000 + declickBuildNumber
         }
     }
 }

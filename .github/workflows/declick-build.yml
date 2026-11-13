@@ -88,9 +88,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NAME: ${{ steps.files.outputs.name }}
+        # Replace assets in place instead of deleting the release first, so a failed upload never leaves the
+        # installed apps without an update feed. APKs go up before the feed that points at them.
         run: |
-          gh release delete latest-declick --yes --cleanup-tag || true
-          gh release create latest-declick dist/* \
-            --title "SmartTube ✦ $NAME" \
-            --target "$GITHUB_SHA" \
-            --notes "Side-by-side SmartTube build with the ✦ de-clickbait button. Install smarttube_declick_armeabi-v7a.apk on Fire TV; the app updates itself from this release."
+          set -euo pipefail
+          NOTES="Side-by-side SmartTube build with the ✦ de-clickbait button. Install smarttube_declick_armeabi-v7a.apk on Fire TV; the app updates itself from this release. Built from $GITHUB_SHA."
+          if ! gh release view latest-declick >/dev/null 2>&1; then
+            gh release create latest-declick --title "SmartTube ✦ $NAME" --target "$GITHUB_SHA" --notes "$NOTES"
+          fi
+          gh release upload latest-declick dist/*.apk --clobber
+          gh release upload latest-declick dist/smarttube_declick.json --clobber
+          gh release edit latest-declick --title "SmartTube ✦ $NAME" --notes "$NOTES"

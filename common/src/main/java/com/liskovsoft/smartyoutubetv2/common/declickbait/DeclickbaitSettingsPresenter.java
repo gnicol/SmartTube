@@ -44,7 +44,11 @@ public class DeclickbaitSettingsPresenter extends BasePresenter<Void> {
 
         dialog.appendSingleButton(UiOptionItem.from(keyTitle, status, option ->
                 SimpleEditDialog.showPassword(getContext(), keyTitle, mPrefs.getApiKey(), newValue -> {
-                    mPrefs.setApiKey(newValue);
+                    if (!mPrefs.setApiKey(newValue)) {
+                        // Never echo what was typed.
+                        MessageHelpers.showLongMessage(getContext(), "That doesn't look like a Claude API key. Nothing was saved.");
+                        return false;
+                    }
                     MessageHelpers.showMessage(getContext(), mPrefs.hasApiKey()
                             ? "Key saved (ends in " + mPrefs.getMaskedKey() + ")" : "Key removed");
                     return true;
