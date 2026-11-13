@@ -296,7 +296,21 @@ public class DeclickbaitOverlay {
     private void renderResearchProgress() {
         long elapsed = Math.max(0, System.currentTimeMillis() - mResearchStartedMs);
         mHeadline.setText(mActivity.getString(R.string.declickbait_research_working) + "  " + Transcript.formatTime(elapsed));
+        // Follow new steps only if the viewer is at the bottom already, so scrolling up to read stays put.
+        boolean atBottom = !mSummaryScroll.canScrollVertically(1);
         mSummary.setText(SummaryText.formatProgress(mActivity.getString(R.string.declickbait_research_working_detail), mResearchSteps));
+        if (atBottom) {
+            mSummaryScroll.post(this::scrollSummaryToBottom);
+        }
+    }
+
+    /** Not fullScroll(), which would pull focus off the button onto the ScrollView. */
+    private void scrollSummaryToBottom() {
+        View content = mSummaryScroll.getChildAt(0);
+        if (content != null) {
+            int bottom = content.getBottom() + mSummaryScroll.getPaddingBottom() - mSummaryScroll.getHeight();
+            mSummaryScroll.smoothScrollTo(0, Math.max(0, bottom));
+        }
     }
 
     /** The research check is ready: show it if the viewer is waiting on it, otherwise keep it for the button. */
