@@ -71,8 +71,14 @@ won't accept the update.
 
 ## Staying current with upstream
 
-`declick-sync.yml` runs daily: it rebases `declickbait` onto upstream `master` and starts a release
-build. If the rebase conflicts, the job fails and GitHub emails you; rebase locally, fix the hook, and push.
+The fork follows upstream's **stable** releases, not `master` (which runs ahead as the beta). Upstream tags
+stable release commits `NN.NNs` (e.g. `32.71s`). `declick-sync.yml` runs daily: when a newer stable tag
+appears it rebases `declickbait` onto it and starts a release build. If the rebase conflicts, the job fails
+and GitHub emails you; rebase locally (`git rebase --onto <new>s <old>s`), fix the hook, and push.
+
+Why stable: beta 32.74 tries YouTube's WEB client first, whose captions need a PO token that the Fire OS 6
+stick can't make, so captions (and the player's own CC) broke there while stable 32.71 worked.
+`TranscriptFetcher` also falls back to the visionOS / Android VR clients for when stable picks that up.
 
 ## Building locally
 

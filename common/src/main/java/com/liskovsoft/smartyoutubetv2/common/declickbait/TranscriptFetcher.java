@@ -10,12 +10,14 @@ import com.liskovsoft.sharedutils.okhttp.OkHttpManager;
 import com.liskovsoft.youtubeapi.common.helpers.AppClient;
 import com.liskovsoft.youtubeapi.service.data.YouTubeMediaItemFormatInfo;
 import com.liskovsoft.youtubeapi.videoinfo.V2.VideoInfoService;
+import com.liskovsoft.youtubeapi.videoinfo.models.VideoInfo;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -90,10 +92,17 @@ public class TranscriptFetcher {
         throw new FetchException(join(reasons));
     }
 
+    /**
+     * VideoInfoService.getVideoInfo(AppClient, String, String) is private in SmartTube 32.71 (stable) and public
+     * from 32.74, so look it up reflectively: one code path for both, and a quiet skip if it ever disappears.
+     */
     @Nullable
     private static List<MediaSubtitle> subtitlesFrom(AppClient client, String videoId) {
         try {
-            MediaItemFormatInfo info = YouTubeMediaItemFormatInfo.from(VideoInfoService.instance().getVideoInfo(client, videoId, null));
+            Method method = VideoInfoService.class.getDeclaredMethod("getVideoInfo", AppClient.class, String.class, String.class);
+            method.setAccessible(true);
+            Object videoInfo = method.invoke(VideoInfoService.instance(), client, videoId, null);
+            MediaItemFormatInfo info = videoInfo instanceof VideoInfo ? YouTubeMediaItemFormatInfo.from((VideoInfo) videoInfo) : null;
             return info != null ? info.getSubtitles() : null;
         } catch (Exception e) {
             Log.w(TAG, "%s client: %s", client.name(), e);

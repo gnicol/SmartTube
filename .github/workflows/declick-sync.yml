@@ -1,6 +1,6 @@
 name: SmartTube ✦ sync upstream
 
-# Daily: replay the fork's commits on top of upstream SmartTube and, if anything changed, build a release.
+# Daily: replay the fork's commits on top of upstream's latest STABLE release and, if anything changed, build a release.
 # A rebase conflict fails this job (GitHub emails you); fix it locally and push the branch.
 # Scheduled runs need "declickbait" to be the fork's default branch.
 
@@ -23,20 +23,33 @@ jobs:
           ref: declickbait
           fetch-depth: 0
 
-      - name: Rebase on upstream
+      - name: Rebase on the latest upstream stable release
         id: rebase
+        # Upstream tags stable releases "NN.NNs" (e.g. 32.71s); master runs ahead as beta. Follow stable only.
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/yuliskov/SmartTube.git
-          git fetch upstream master
-          if git merge-base --is-ancestor upstream/master HEAD; then
-            echo "Already up to date with upstream."
-          else
-            git rebase upstream/master
-            git push --force-with-lease origin HEAD:declickbait
+          git fetch -q upstream --tags --force
+          STABLE_TAGS="$(git tag -l '[0-9]*.[0-9]*s' | sort -V)"
+          NEW="$(echo "$STABLE_TAGS" | tail -1)"
+          if git merge-base --is-ancestor "$NEW" HEAD; then
+            echo "Already on the latest stable release ($NEW)."
+            exit 0
           fi
+          # The stable tag this branch currently sits on: replay only our commits from there.
+          OLD=""
+          for t in $(echo "$STABLE_TAGS" | sort -Vr); do
+            if git merge-base --is-ancestor "$t" HEAD; then OLD="$t"; break; fi
+          done
+          if [ -z "$OLD" ]; then
+            echo "::error::Can't tell which stable release declickbait is based on."
+            exit 1
+          fi
+          echo "Moving from $OLD to $NEW"
+          git rebase --onto "$NEW" "$OLD"
+          git push --force-with-lease origin HEAD:declickbait
 
       - name: Build a release if the published one is behind
         env:
