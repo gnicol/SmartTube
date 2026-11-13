@@ -1,0 +1,20 @@
+// Local-only Gradle init script for Apple Silicon without Rosetta.
+// protoc 3.17.3's "osx-aarch_64" artifact is really x86_64, so swap in 3.21.12 (native arm64)
+// for both the compiler and the javalite runtime. CI (Linux x86_64) builds keep 3.17.3.
+def PROTO = '3.21.12'
+allprojects {
+    configurations.all {
+        resolutionStrategy.eachDependency { details ->
+            if (details.requested.group == 'com.google.protobuf' && details.requested.name == 'protobuf-javalite') {
+                details.useVersion PROTO
+            }
+        }
+    }
+    pluginManager.withPlugin('com.google.protobuf') {
+        afterEvaluate { p ->
+            p.protobuf {
+                protoc { artifact = "com.google.protobuf:protoc:${PROTO}" }
+            }
+        }
+    }
+}

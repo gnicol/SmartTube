@@ -65,6 +65,8 @@ public class AppDataSourceManager {
                 context.getString(R.string.content_block_provider), () -> SponsorBlockSettingsPresenter.instance(context).show(), R.drawable.settings_block));
         settingItems.add(new SettingsItem(
                 context.getString(R.string.dearrow_provider), () -> DeArrowSettingsPresenter.instance(context).show(), R.drawable.settings_dearrow));
+        settingItems.add(new SettingsItem( // declickbait
+                context.getString(R.string.declickbait_title), () -> com.liskovsoft.smartyoutubetv2.common.declickbait.DeclickbaitSettingsPresenter.instance(context).show(), R.drawable.settings_declickbait));
         settingItems.add(new SettingsItem(
                 context.getString(R.string.app_backup_restore), () -> BackupSettingsPresenter.instance(context).show(), R.drawable.settings_backup));
 

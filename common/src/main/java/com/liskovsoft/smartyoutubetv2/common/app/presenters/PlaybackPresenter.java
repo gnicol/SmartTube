@@ -66,6 +66,7 @@ public class PlaybackPresenter extends BasePresenter<PlaybackView> implements Pl
         mEventListeners.add(new HQDialogController());
         mEventListeners.add(new ChatController());
         mEventListeners.add(new CommentsController());
+        mEventListeners.add(new com.liskovsoft.smartyoutubetv2.common.declickbait.DeclickbaitController()); // declickbait
     }
 
     public static PlaybackPresenter instance(Context context) {

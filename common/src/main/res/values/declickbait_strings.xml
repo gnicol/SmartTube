@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="declickbait_title">De-clickbait</string>
+    <string name="declickbait_kicker_guess">De-clickbait · your guess first</string>
+    <string name="declickbait_kicker_working">De-clickbait</string>
+    <string name="declickbait_kicker_answer">The answer</string>
+    <string name="declickbait_kicker_moments">Worth watching</string>
+    <string name="declickbait_prompt">What do you think it is?</string>
+    <string name="declickbait_reveal">Reveal answer</string>
+    <string name="declickbait_not_now">Not now</string>
+    <string name="declickbait_close">Close</string>
+    <string name="declickbait_open_settings">Settings</string>
+    <string name="declickbait_keys_hint">OK jumps there · Back resumes where you were</string>
+    <string name="declickbait_moments_row">✦ Key moments</string>
+    <string name="declickbait_the_answer">The answer: %s</string>
+    <string name="declickbait_not_found">Not in this video</string>
+    <string name="declickbait_settings_key">Claude API key</string>
+    <string name="declickbait_settings_key_hint">Paste from your phone with the Fire TV or Google TV app keyboard</string>
+    <string name="declickbait_settings_test">Test key</string>
+    <string name="declickbait_settings_model">Model</string>
+    <string name="declickbait_settings_guess_first">Guess before showing the answer</string>
+    <string name="declickbait_settings_button">Show ✦ button in the player</string>
+    <string name="declickbait_settings_clear">Clear saved answers</string>
+</resources>

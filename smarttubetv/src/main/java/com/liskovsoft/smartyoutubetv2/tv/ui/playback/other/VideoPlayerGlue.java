@@ -134,6 +134,7 @@ public class VideoPlayerGlue extends MaxControlsVideoPlayerGlue<PlayerAdapter> i
         putAction(new RotateAction(context));
         putAction(new FlipAction(context));
         putAction(new SoundOffAction(context));
+        putAction(new com.liskovsoft.smartyoutubetv2.tv.ui.playback.actions.DeclickbaitAction(context)); // declickbait
     }
 
     @Override
@@ -236,6 +237,9 @@ public class VideoPlayerGlue extends MaxControlsVideoPlayerGlue<PlayerAdapter> i
         }
         if (mPlayerTweaksData.isPlayerButtonEnabled(PlayerTweaksData.PLAYER_BUTTON_VIDEO_STATS)) {
             adapter.add(mActions.get(R.id.action_video_stats));
+        }
+        if (com.liskovsoft.smartyoutubetv2.common.declickbait.DeclickbaitPrefs.instance(getContext()).isButtonEnabled()) { // declickbait
+            adapter.add(mActions.get(R.id.action_declickbait));
         }
     }
 

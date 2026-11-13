@@ -255,3 +255,5 @@ dependencies {
 
     implementation 'androidx.work:work-runtime:' + workVersion
 }
+
+apply from: "declick.gradle" // declickbait fork: side-by-side build type
