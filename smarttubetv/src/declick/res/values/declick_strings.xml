@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launcher name for the declickbait build, so it's easy to tell apart from stock SmartTube. -->
+    <string translatable="false" name="app_name"><![CDATA[SmartTube ✦]]></string>
+</resources>

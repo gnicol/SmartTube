@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings tile: grey disc with a dark lightbulb, matching the other settings icons. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp" android:height="100dp"
+    android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#FFB0B0B0" android:pathData="M24,7a17,17 0,1 0,0.01 0z"/>
+    <path android:fillColor="#00000000" android:strokeColor="#FF474747" android:strokeWidth="2.6"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M20.5,31h7M21.5,35h5M24,13a8,8 0,0 0,-5 14.2c0.8,0.8 1,1.7 1,3.1h8c0,-1.4 0.2,-2.3 1,-3.1A8,8 0,0 0,24 13z"/>
+</vector>

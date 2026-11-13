@@ -1,0 +1,48 @@
+name: SmartTube ✦ sync upstream
+
+# Daily: replay the fork's commits on top of upstream SmartTube and, if anything changed, build a release.
+# A rebase conflict fails this job (GitHub emails you); fix it locally and push the branch.
+# Scheduled runs need "declickbait" to be the fork's default branch.
+
+on:
+  schedule:
+    - cron: '17 10 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: declickbait
+          fetch-depth: 0
+
+      - name: Rebase on upstream
+        id: rebase
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/yuliskov/SmartTube.git
+          git fetch upstream master
+          if git merge-base --is-ancestor upstream/master HEAD; then
+            echo "Already up to date with upstream."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git rebase upstream/master
+          git push --force-with-lease origin HEAD:declickbait
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build the new release
+        if: steps.rebase.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Pushes made with GITHUB_TOKEN don't trigger workflows, so start the build explicitly.
+        run: gh workflow run declick-build.yml --ref declickbait

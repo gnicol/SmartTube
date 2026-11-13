@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- In-app updates come from the fork's GitHub releases, not upstream (whose APKs are signed with a different key). -->
+    <string-array name="update_urls">
+        <item>https://github.com/gnicol/SmartTube/releases/download/latest-declick/smarttube_declick.json</item>
+    </string-array>
+</resources>

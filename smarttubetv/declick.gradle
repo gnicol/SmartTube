@@ -1,0 +1,56 @@
+// SmartTube ✦ (declickbait fork): a "declick" build type of the normal flavors with its own app ID,
+// launcher name, signing key and update feed, so it installs next to stock SmartTube.
+// Applied from build.gradle with one line; everything else lives in src/declick/.
+//
+// Build:   ./gradlew :smarttubetv:assembleStstableDeclick
+// Signing: env DECLICK_KEYSTORE / DECLICK_STORE_PASSWORD / DECLICK_KEY_ALIAS / DECLICK_KEY_PASSWORD (CI),
+//          else ~/.config/smarttube-declick/keystore.properties (local).
+
+def declickProps = new Properties()
+def declickPropsFile = new File(System.getProperty('user.home'), '.config/smarttube-declick/keystore.properties')
+if (declickPropsFile.exists()) {
+    declickPropsFile.withInputStream { declickProps.load(it) }
+}
+def declickEnv = System.getenv()
+def declickStore = declickEnv['DECLICK_KEYSTORE'] ?: declickProps['storeFile']
+
+android {
+    signingConfigs {
+        declick {
+            if (declickStore) {
+                storeFile file(declickStore)
+                storePassword declickEnv['DECLICK_STORE_PASSWORD'] ?: declickProps['storePassword']
+                keyAlias declickEnv['DECLICK_KEY_ALIAS'] ?: declickProps['keyAlias']
+                keyPassword declickEnv['DECLICK_KEY_PASSWORD'] ?: declickProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        declick {
+            initWith release
+            applicationIdSuffix '.declick'
+            matchingFallbacks = ['release']
+            signingConfig declickStore ? signingConfigs.declick : null
+        }
+    }
+}
+
+// The in-app updater compares versionCode, so fork-only releases need their own numbers:
+// upstream code × 100 + CI build counter (DECLICK_BUILD_NUMBER). Stays increasing across upstream bumps.
+def declickBuildNumber = (declickEnv['DECLICK_BUILD_NUMBER'] ?: '0') as int
+android.applicationVariants.all { variant ->
+    if (variant.buildType.name == 'declick') {
+        variant.outputs.all { output ->
+            output.versionCodeOverride = variant.versionCode * 100 + (declickBuildNumber % 100)
+        }
+    }
+}
+
+// Upstream's google-services.json and Crashlytics belong to upstream's Firebase project and don't list our
+// app ID. Skip them: Firebase then logs that it couldn't initialise and the app carries on.
+tasks.configureEach { task ->
+    if (task.name.contains('Declick') && (task.name.contains('GoogleServices') || task.name.toLowerCase().contains('crashlytics'))) {
+        task.enabled = false
+    }
+}
