@@ -106,6 +106,29 @@ class ControlBar extends LinearLayout {
         }
     }
 
+    /**
+     * declickbait: left on the first control wraps to the last one, and right on the last wraps to the first,
+     * so the buttons at the far end of a long row are one press away.
+     */
+    @Override
+    public View focusSearch(View focused, int direction) {
+        int count = getChildCount();
+        View child = getFocusedChild();
+        if (count > 1 && child != null && (direction == View.FOCUS_LEFT || direction == View.FOCUS_RIGHT)) {
+            boolean rtl = getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+            int index = indexOfChild(child);
+            int first = rtl ? count - 1 : 0;
+            int last = rtl ? 0 : count - 1;
+            if (direction == View.FOCUS_LEFT && index == first) {
+                return getChildAt(last);
+            }
+            if (direction == View.FOCUS_RIGHT && index == last) {
+                return getChildAt(first);
+            }
+        }
+        return super.focusSearch(focused, direction);
+    }
+
     public void setOnChildFocusedListener(OnChildFocusedListener listener) {
         mOnChildFocusedListener = listener;
     }

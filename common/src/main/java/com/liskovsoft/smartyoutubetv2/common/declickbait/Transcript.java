@@ -59,6 +59,17 @@ public class Transcript {
         return sb.toString();
     }
 
+    /** Timestamped lines starting within [fromMs, toMs], in the same form as {@link #toPromptText()}. */
+    public String toPromptText(long fromMs, long toMs) {
+        StringBuilder sb = new StringBuilder();
+        for (Line line : mLines) {
+            if (line.startMs >= fromMs && line.startMs <= toMs) {
+                sb.append('[').append(formatTime(line.startMs)).append("] ").append(line.text).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
     /**
      * Turn a "m:ss" / "h:mm:ss" stamp from Claude into the start of the transcript line at or before it.
      * Returns -1 if the stamp can't be parsed.

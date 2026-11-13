@@ -39,6 +39,9 @@ public class DeclickbaitController extends BasePlayerController {
     private Disposable mFormatAction;
     private Disposable mTranscriptAction;
     private Disposable mClaudeAction;
+    private Disposable mResearchAction;
+    /** Video the research check is running for. */
+    private String mResearchVideoId;
     private DeclickbaitOverlay mOverlay;
     private MediaItemMetadata mMetadata;
     private VideoGroup mMomentsGroup;
@@ -137,6 +140,9 @@ public class DeclickbaitController extends BasePlayerController {
         if (!videoId.equals(mWorkVideoId)) {
             cancelWork();
         }
+        if (!videoId.equals(mResearchVideoId)) {
+            cancelResearch();
+        }
 
         // Per-overlay state: dismiss callbacks are queued, so an old overlay's callback can run after a new one opened.
         final boolean wasPlaying = getPlayer().getPlayWhenReady();
@@ -167,6 +173,11 @@ public class DeclickbaitController extends BasePlayerController {
             @Override
             public void onOpenSettings() {
                 DeclickbaitSettingsPresenter.instance(getContext()).show();
+            }
+
+            @Override
+            public void onCheckResearch(DeclickbaitResult result) {
+                checkResearch(result);
             }
 
             @Override
@@ -289,6 +300,44 @@ public class DeclickbaitController extends BasePlayerController {
         );
     }
 
+    /** The on-demand second pass. Keeps running if the overlay closes, and the answer is saved with the summary. */
+    private void checkResearch(DeclickbaitResult result) {
+        final String videoId = result.videoId;
+        if (videoId == null || !isCurrentVideo(videoId)) {
+            return;
+        }
+        if (videoId.equals(mResearchVideoId) && RxHelper.isAnyActionRunning(mResearchAction)) {
+            return; // Re-opened while it runs: the overlay already shows progress, and the answer will reach it.
+        }
+        RxHelper.disposeActions(mResearchAction);
+        mResearchVideoId = videoId;
+        long durationMs = getPlayer() != null ? getPlayer().getDurationMs() : 0;
+        final ClaudeClient.VideoInfo info = buildVideoInfo(videoId, durationMs);
+        mResearchAction = RxHelper.<DeclickbaitResult.ResearchCheck>createLong(emitter -> {
+            try {
+                emitter.onNext(ClaudeClient.checkResearch(mPrefs, info, result));
+                emitter.onComplete();
+            } catch (ClaudeClient.ClaudeException e) {
+                emitter.tryOnError(e);
+            }
+        }).subscribe(
+                check -> {
+                    result.research = check;
+                    DeclickbaitCache.put(getContext(), result);
+                    if (isOverlayFor(videoId)) {
+                        mOverlay.showResearch(check);
+                    }
+                },
+                error -> {
+                    String msg = error instanceof ClaudeClient.ClaudeException ? error.getMessage() : "Something went wrong checking the research.";
+                    Log.e(TAG, "Research check failed: %s", error.getMessage());
+                    if (isOverlayFor(videoId)) {
+                        mOverlay.setResearchError(msg);
+                    }
+                }
+        );
+    }
+
     private ClaudeClient.VideoInfo buildVideoInfo(String videoId, long durationMs) {
         ClaudeClient.VideoInfo info = new ClaudeClient.VideoInfo();
         Video video = getVideo();
@@ -339,8 +388,14 @@ public class DeclickbaitController extends BasePlayerController {
         }
     }
 
+    private void cancelResearch() {
+        RxHelper.disposeActions(mResearchAction);
+        mResearchVideoId = null;
+    }
+
     private void cancel() {
         cancelWork();
+        cancelResearch();
         dismissOverlay();
     }
 

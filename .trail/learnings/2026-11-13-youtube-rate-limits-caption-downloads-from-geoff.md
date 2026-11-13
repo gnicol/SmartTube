@@ -15,6 +15,7 @@ touches:
 
 ## Watch out
 - Testing the Claude prompt on the Mac needs captions, and YouTube cut them off fast. On 2026-11-12 yt-dlp fetched captions for two videos (two tracks each, `en` and `en-orig`), then every caption request for any video returned HTTP 429. It was still 429 at 08:32 the next morning, about 11 hours later. Search and video details (title, chapters, length) kept working throughout; only the caption download was refused.
+- The limit is patchy, not a total block: on 2026-11-13 after a yt-dlp upgrade, one video's captions (a 2h46 interview) downloaded while three others still got 429 on repeated tries. The same captions show fine in a browser, which YouTube treats differently. Retrying in a loop is not the answer (Geoff ruled it out); take what downloads and test the rest on a TV.
 - Why it matters: Geoff's eight example videos could not be tested locally, so prompt changes were judged on two videos picked before the limit hit.
 - The Mac and both TVs share the home's public address. Nobody checked whether captions on the TVs were affected while the Mac was limited.
 

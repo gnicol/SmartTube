@@ -16,10 +16,14 @@ import androidx.core.content.ContextCompat;
 
 import com.liskovsoft.smartyoutubetv2.common.R;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Full-screen wash over the paused video. Shows progress while the transcript is read and Claude works, then the
  * overview to read. The moments to jump to wait in a rail that peeks in from the right edge and slides out over
- * the text when focus moves into it.
+ * the text when focus moves into it. When the summary flagged claims based on research, a button under it offers
+ * to check them against the papers; the result replaces the summary until Back or the button returns to it.
  */
 public class DeclickbaitOverlay {
     /** How much of the rail stays on screen while the overview has focus: its times and the start of each label. */
@@ -33,6 +37,8 @@ public class DeclickbaitOverlay {
         void onClosed(boolean userClosed);
         void onOpenSettings();
         void onResultShown(DeclickbaitResult result);
+        /** Run the research check; answer with {@link #showResearch} or {@link #setResearchError}. */
+        void onCheckResearch(DeclickbaitResult result);
     }
 
     private final Activity mActivity;
@@ -51,6 +57,13 @@ public class DeclickbaitOverlay {
     private final View mSummaryScroll;
     private final View mRail;
     private final LinearLayout mMoments;
+    private final TextView mHeadline;
+    private final TextView mSummary;
+    private final Button mResearchButton;
+    private DeclickbaitResult mResult;
+    /** Showing the research check (or its progress) instead of the summary. */
+    private boolean mResearchMode;
+    private boolean mResearchRunning;
     /** The row that takes focus when the rail opens: where the title is answered at first, then the last one used. */
     private View mJumpFocus;
     private boolean mRailOpen;
@@ -80,6 +93,9 @@ public class DeclickbaitOverlay {
         mSummaryScroll = root.findViewById(R.id.declickbait_summary_scroll);
         mRail = root.findViewById(R.id.declickbait_rail);
         mMoments = root.findViewById(R.id.declickbait_moments);
+        mHeadline = root.findViewById(R.id.declickbait_headline);
+        mSummary = root.findViewById(R.id.declickbait_summary);
+        mResearchButton = root.findViewById(R.id.declickbait_research_button);
 
         ((TextView) root.findViewById(R.id.declickbait_video_title)).setText(videoTitle);
 
@@ -95,6 +111,23 @@ public class DeclickbaitOverlay {
             }
         });
         mSummaryScroll.setOnKeyListener(this::onOverviewKey);
+        mResearchButton.setOnClickListener(v -> onResearchButton());
+        mResearchButton.setOnKeyListener(this::onResearchButtonKey);
+        mResearchButton.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) {
+                setRailOpen(false);
+            }
+        });
+        // Back leaves the research check before it closes the overlay. The rail handles its own Back.
+        mDialog.setOnKeyListener((dialog, keyCode, event) -> {
+            if (keyCode == KeyEvent.KEYCODE_BACK && mResearchMode && !mRailOpen) {
+                if (event.getAction() == KeyEvent.ACTION_UP) {
+                    showSummary();
+                }
+                return true;
+            }
+            return false;
+        });
     }
 
     public static DeclickbaitOverlay show(Activity activity, String videoTitle, Listener listener) {
@@ -153,16 +186,122 @@ public class DeclickbaitOverlay {
     }
 
     public void showResult(DeclickbaitResult r) {
+        mResult = r;
+        mRailOpen = false;
+        mOverview.setAlpha(1f);
+        showSummary();
+
+        mProgressPanel.setVisibility(View.GONE);
+        mResultPanel.setVisibility(View.VISIBLE);
+        mSummaryScroll.requestFocus();
+        mListener.onResultShown(r);
+    }
+
+    /** The summary view: headline, summary text, the video's moments in the rail. */
+    private void showSummary() {
+        DeclickbaitResult r = mResult;
         float density = mActivity.getResources().getDisplayMetrics().density;
-
-        ((TextView) mResultPanel.findViewById(R.id.declickbait_headline)).setText(r.headline);
+        mResearchMode = false;
+        mHeadline.setText(r.headline);
         // The title check rides at the end of the summary, so it costs no height of its own.
-        ((TextView) mResultPanel.findViewById(R.id.declickbait_summary)).setText(
-                SummaryText.format(r.summary, mActivity.getString(verdictText(r)), r.titleCheck, density));
+        mSummary.setText(SummaryText.format(r.summary, mActivity.getString(verdictText(r)), r.titleCheck, density));
+        fillRail(r.moments);
+        updateResearchButton();
+        mSummaryScroll.scrollTo(0, 0);
+        if (!mRailOpen && !mResearchButton.hasFocus()) {
+            mSummaryScroll.requestFocus();
+        }
+    }
 
+    private void updateResearchButton() {
+        int claims = mResult.researchClaims.size();
+        if (claims == 0) {
+            mResearchButton.setVisibility(View.GONE);
+            return;
+        }
+        mResearchButton.setVisibility(View.VISIBLE);
+        if (mResearchMode) {
+            mResearchButton.setText(R.string.declickbait_research_back);
+        } else if (mResult.research != null || mResearchRunning) {
+            mResearchButton.setText(R.string.declickbait_research_show);
+        } else {
+            mResearchButton.setText(claims == 1
+                    ? mActivity.getString(R.string.declickbait_research_check_one)
+                    : mActivity.getString(R.string.declickbait_research_check, claims));
+        }
+    }
+
+    private void onResearchButton() {
+        if (mResearchMode) {
+            showSummary();
+            mResearchButton.requestFocus();
+            return;
+        }
+        if (mResult.research != null) {
+            renderResearch(mResult.research);
+            return;
+        }
+        if (!mResearchRunning) {
+            mResearchRunning = true;
+            mListener.onCheckResearch(mResult);
+        }
+        showResearchProgress();
+    }
+
+    private void showResearchProgress() {
+        mResearchMode = true;
+        mHeadline.setText(R.string.declickbait_research_working);
+        mSummary.setText(R.string.declickbait_research_working_detail);
+        updateResearchButton();
+        mSummaryScroll.scrollTo(0, 0);
+    }
+
+    /** The research check is ready: show it if the viewer is waiting on it, otherwise keep it for the button. */
+    public void showResearch(DeclickbaitResult.ResearchCheck check) {
+        if (mResult == null) {
+            return; // This overlay is still loading its summary; the saved check comes with it.
+        }
+        mResearchRunning = false;
+        mResult.research = check;
+        if (mResearchMode) {
+            renderResearch(check);
+        } else {
+            updateResearchButton();
+        }
+    }
+
+    private void renderResearch(DeclickbaitResult.ResearchCheck check) {
+        mResearchMode = true;
+        mHeadline.setText(R.string.declickbait_research_title);
+        mSummary.setText(SummaryText.formatResearch(check));
+        List<DeclickbaitResult.Moment> jumps = new ArrayList<>();
+        for (DeclickbaitResult.Study s : check.studies) {
+            jumps.add(new DeclickbaitResult.Moment(s.ms, s.label, false));
+        }
+        fillRail(jumps.isEmpty() ? mResult.moments : jumps);
+        updateResearchButton();
+        mSummaryScroll.scrollTo(0, 0);
+    }
+
+    /** Shown if the viewer is waiting on the check; either way the next press of the button tries again. */
+    public void setResearchError(String message) {
+        if (mResult == null) {
+            return;
+        }
+        mResearchRunning = false;
+        if (mResearchMode) {
+            mHeadline.setText(R.string.declickbait_research_title);
+            mSummary.setText(message);
+        }
+        updateResearchButton();
+    }
+
+    private void fillRail(List<DeclickbaitResult.Moment> moments) {
+        float density = mActivity.getResources().getDisplayMetrics().density;
+        boolean railHadFocus = mRail.hasFocus();
         mMoments.removeAllViews();
         mJumpFocus = null;
-        for (DeclickbaitResult.Moment m : r.moments) {
+        for (DeclickbaitResult.Moment m : moments) {
             View row = addMoment(m, density);
             if (mJumpFocus == null && m.answersTitle) {
                 mJumpFocus = row;
@@ -171,16 +310,12 @@ public class DeclickbaitOverlay {
         if (mJumpFocus == null && mMoments.getChildCount() > 0) {
             mJumpFocus = mMoments.getChildAt(0);
         }
-
-        mRailOpen = false;
         mRail.setVisibility(mJumpFocus != null ? View.VISIBLE : View.GONE);
-        mRail.setTranslationX(railClosedX());
-        mOverview.setAlpha(1f);
-
-        mProgressPanel.setVisibility(View.GONE);
-        mResultPanel.setVisibility(View.VISIBLE);
-        mSummaryScroll.requestFocus();
-        mListener.onResultShown(r);
+        if (railHadFocus && mJumpFocus != null) {
+            mJumpFocus.requestFocus();
+        } else if (!mRailOpen) {
+            mRail.setTranslationX(railClosedX());
+        }
     }
 
     private static int verdictText(DeclickbaitResult r) {
@@ -204,11 +339,39 @@ public class DeclickbaitOverlay {
                 return true;
             case KeyEvent.KEYCODE_DPAD_LEFT:
                 return true;
-            // The ScrollView scrolls itself. At either end stop here, or focus search wanders into the rail.
+            // The ScrollView scrolls itself. At either end stop here, or focus search wanders into the rail;
+            // past the bottom, the research button takes focus when there is one.
             case KeyEvent.KEYCODE_DPAD_UP:
                 return !v.canScrollVertically(-1);
             case KeyEvent.KEYCODE_DPAD_DOWN:
-                return !v.canScrollVertically(1);
+                if (v.canScrollVertically(1)) {
+                    return false;
+                }
+                if (event.getAction() == KeyEvent.ACTION_DOWN && mResearchButton.getVisibility() == View.VISIBLE) {
+                    mResearchButton.requestFocus();
+                }
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private boolean onResearchButtonKey(View v, int keyCode, KeyEvent event) {
+        boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_UP:
+                if (down) {
+                    mSummaryScroll.requestFocus();
+                }
+                return true;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                if (down && mJumpFocus != null) {
+                    mJumpFocus.requestFocus();
+                }
+                return true;
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                return true;
             default:
                 return false;
         }

@@ -7,6 +7,12 @@ scroll it), ending with a one-line check of whether the title holds up. Moments 
 from the right edge: press right to slide them out, OK to jump, left or Back to return to the overview.
 The same moments appear as amber marks on the seekbar and a "✦ Key moments" row under the player.
 
+When a video bases its advice on research ("trials show…", a named study), the summary ends with a
+**Check N research claims** button (down from the summary reaches it). It runs a second request, with web search,
+that looks up the paper behind each claim and shows what the paper actually found, whether the video matches or
+overstates it, and how strong the evidence is. It takes about a minute, always uses Opus (whatever the model setting),
+and is saved with the summary. Videos that don't lean on research, like interviews, get no button.
+
 The goal is the substance of the video without sitting through it. Many videos aren't clickbait so much as
 slow to reach the point, so the summary comes first and the title check is the bonus.
 
@@ -54,6 +60,8 @@ Almost everything is in new files:
 One-line hooks in upstream files, each tagged `// declickbait`:
 `PlaybackPresenter.java` (register controller), `AppDataSourceManager.java` (settings tile),
 `VideoPlayerGlue.java` (button, two places), `smarttubetv/build.gradle` (`apply from: "declick.gradle"`).
+One small override, also tagged: `tweaks/ControlBar.java#focusSearch` makes left on the first player control wrap
+to the last (where ✦ sits) and right on the last wrap to the first.
 
 Why not the official Anthropic Java SDK: it needs Android 8+ (Jackson 2.19) and OkHttp 4, but SmartTube
 pins OkHttp 3.12 and the bedroom Fire TV Stick 4K (1st gen) runs Android 7.1.

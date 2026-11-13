@@ -81,8 +81,33 @@ public class ClaudeClient {
             + "- Thumbnail text is part of the promise and can narrow what the title means.\n"
             + "- `title_check` is a footnote shown after the summary: one sentence of 25 words or fewer on whether the video "
             + "backs up the title and thumbnail, with the verdict in `title_supported`.\n"
+            + "- `research_claims`: the claims the video rests on that cite research: a named study, trial, review, journal, "
+            + "university, or a statistic presented as a study finding. List up to four, the ones that matter most to what the "
+            + "video tells viewers to believe or do, with how the video cites each and a `label` of five words or fewer. Leave "
+            + "it empty when the video doesn't lean on research: opinion, interviews, stories, how-tos, entertainment, or a "
+            + "passing \"studies show\" that nothing depends on. The viewer can ask for these to be checked against the papers.\n"
             + "- Report only what the video actually says. Leave out intros, recaps, sponsor reads and calls to subscribe.\n"
             + "- Write plainly; this is read on a TV from the couch. Always write in English.";
+
+    /** The on-demand second pass: find the papers behind the flagged claims and judge them. */
+    static final String RESEARCH_PROMPT = "You check the research a YouTube video cites. You'll receive the video's title, "
+            + "channel and description, and the claims it bases on research, each with how the video cites it and the "
+            + "transcript around it. The viewer reads your reply on a TV.\n\n"
+            + "For each claim:\n"
+            + "- Use web search to find the paper the video relies on: prefer PubMed, the journal, or a trial registry. Fetch a "
+            + "page when you need the abstract or the numbers.\n"
+            + "- If the video doesn't name the study, find the most likely source and say plainly in `citation_note` that it "
+            + "is the likely source rather than one the video named. If you can't identify one with confidence, set `verdict` "
+            + "to not_found; never invent a citation.\n"
+            + "- Compare what the paper found with what the video says, numbers included, and give the verdict: matches, "
+            + "overstates (true direction, bigger or broader than the paper shows), misrepresents (the paper doesn't support "
+            + "it), or not_found.\n"
+            + "- Judge the evidence itself: design (randomised trial, observational, animal, lab, review of trials), how many "
+            + "people, for how long, who they were, funding or conflicts if stated, and the main limitation. Rate `strength` "
+            + "accordingly: a large, well-run randomised trial or a review of several is strong; one small trial is weak; "
+            + "observational, animal or lab work cannot show that something works in people.\n"
+            + "- `overall`: two sentences on whether the research backs what the video tells viewers.\n"
+            + "Write plainly and briefly in English; each field is read on a TV.";
 
     static JSONObject schema() throws JSONException {
         JSONObject moment = new JSONObject()
@@ -100,10 +125,19 @@ public class ClaudeClient {
                 .put("moments", new JSONObject().put("type", "array").put("items", moment).put("description", "In time order."))
                 .put("title_check", str("One sentence, 25 words or fewer, on whether the video supports the title and thumbnail claims."))
                 .put("title_supported", new JSONObject().put("type", "string")
-                        .put("enum", new JSONArray().put("yes").put("partly").put("no")));
+                        .put("enum", new JSONArray().put("yes").put("partly").put("no")))
+                .put("research_claims", new JSONObject().put("type", "array").put("items", new JSONObject()
+                        .put("type", "object")
+                        .put("properties", new JSONObject()
+                                .put("claim", str("What the video says the research found, one sentence."))
+                                .put("cited_as", str("How the video identifies it: names, journal, year, or 'not named'."))
+                                .put("label", str("Five words or fewer."))
+                                .put("at", str("m:ss copied from the transcript line where it is cited.")))
+                        .put("required", new JSONArray().put("claim").put("cited_as").put("label").put("at"))
+                        .put("additionalProperties", false)));
 
         JSONArray required = new JSONArray();
-        for (String key : new String[] {"headline", "summary", "moments", "title_check", "title_supported"}) {
+        for (String key : new String[] {"headline", "summary", "moments", "title_check", "title_supported", "research_claims"}) {
             required.put(key);
         }
 
@@ -228,18 +262,23 @@ public class ClaudeClient {
     }
 
     private static JSONObject post(DeclickbaitPrefs prefs, JSONObject body) throws ClaudeException, ImageException, JSONException {
+        return post(prefs, body, client());
+    }
+
+    private static JSONObject post(DeclickbaitPrefs prefs, JSONObject body, OkHttpClient httpClient)
+            throws ClaudeException, ImageException, JSONException {
         Request.Builder request = new Request.Builder()
                 .url(URL)
                 .header("x-api-key", keyHeader(prefs))
                 .header("anthropic-version", API_VERSION)
                 .post(RequestBody.create(JSON, body.toString()));
-        if (usesFallbacks(prefs)) {
+        if (body.has("fallbacks")) {
             request.header("anthropic-beta", FALLBACK_BETA);
         }
 
         String text;
         int code;
-        try (Response response = client().newCall(request.build()).execute()) {
+        try (Response response = httpClient.newCall(request.build()).execute()) {
             code = response.code();
             ResponseBody responseBody = response.body();
             text = responseBody != null ? responseBody.string() : "";
@@ -267,7 +306,7 @@ public class ClaudeClient {
             throw new ClaudeException("Claude rejected the API key. Check it in Settings.", true);
         }
         if (code == 403) {
-            throw new ClaudeException("This API key isn't allowed to use " + prefs.getModel() + ".", true);
+            throw new ClaudeException("This API key isn't allowed to use " + body.optString("model") + ".", true);
         }
         if (code == 400 && apiMessage.toLowerCase().contains("credit")) {
             throw new ClaudeException("Your Claude API account is out of credit.", true);
@@ -291,6 +330,14 @@ public class ClaudeClient {
             throw new ClaudeException("Claude's answer was cut off. Try again.", false);
         }
 
+        String servedBy = response.optString("model", prefs.getModel());
+        DeclickbaitResult result = DeclickbaitResult.fromClaude(info.videoId, servedBy, new JSONObject(responseText(response)), transcript);
+        result.durationMs = info.durationMs;
+        return result;
+    }
+
+    /** The structured answer: every text block joined (web search splits it into several). */
+    private static String responseText(JSONObject response) throws ClaudeException {
         StringBuilder text = new StringBuilder();
         JSONArray content = response.optJSONArray("content");
         if (content != null) {
@@ -304,11 +351,127 @@ public class ClaudeClient {
         if (text.length() == 0) {
             throw new ClaudeException("Claude didn't return an answer.", false);
         }
+        return text.toString();
+    }
 
-        String servedBy = response.optString("model", prefs.getModel());
-        DeclickbaitResult result = DeclickbaitResult.fromClaude(info.videoId, servedBy, new JSONObject(text.toString()), transcript);
-        result.durationMs = info.durationMs;
-        return result;
+    // --- Research check: the on-demand second pass ---
+
+    /** Web search runs inside the request, so it can take a minute or two. */
+    private static OkHttpClient sResearchClient;
+    private static final int RESEARCH_MAX_CONTINUES = 4;
+
+    private static synchronized OkHttpClient researchClient() {
+        if (sResearchClient == null) {
+            sResearchClient = client().newBuilder().readTimeout(240, TimeUnit.SECONDS).build();
+        }
+        return sResearchClient;
+    }
+
+    static JSONObject researchSchema() throws JSONException {
+        JSONObject study = new JSONObject()
+                .put("type", "object")
+                .put("properties", new JSONObject()
+                        .put("claim_number", new JSONObject().put("type", "integer").put("description", "The claim's number as given."))
+                        .put("citation", str("Authors, year and journal of the paper; empty if not found."))
+                        .put("citation_note", str("Empty if the video named this paper; otherwise say it is the likely source."))
+                        .put("url", str("The paper's page."))
+                        .put("paper_finding", str("What the paper actually found, with its numbers. One or two sentences."))
+                        .put("verdict", new JSONObject().put("type", "string")
+                                .put("enum", new JSONArray().put("matches").put("overstates").put("misrepresents").put("not_found")))
+                        .put("strength", new JSONObject().put("type", "string")
+                                .put("enum", new JSONArray().put("strong").put("moderate").put("weak").put("very_weak").put("unknown")))
+                        .put("design", str("Design, number of people, duration, population. One line."))
+                        .put("caveat", str("The main limitation, one sentence.")))
+                .put("required", new JSONArray().put("claim_number").put("citation").put("citation_note").put("url")
+                        .put("paper_finding").put("verdict").put("strength").put("design").put("caveat"))
+                .put("additionalProperties", false);
+        return new JSONObject()
+                .put("type", "object")
+                .put("properties", new JSONObject()
+                        .put("studies", new JSONObject().put("type", "array").put("items", study))
+                        .put("overall", str("Two sentences: does the research back what the video tells viewers?")))
+                .put("required", new JSONArray().put("studies").put("overall"))
+                .put("additionalProperties", false);
+    }
+
+    static String buildResearchText(VideoInfo info, DeclickbaitResult result) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Title: ").append(info.title).append("\n\n");
+        if (info.channel != null) {
+            sb.append("Channel: ").append(info.channel).append("\n\n");
+        }
+        if (info.description != null && !info.description.trim().isEmpty()) {
+            String desc = info.description.trim();
+            sb.append("Description (truncated):\n").append(desc.length() > 1500 ? desc.substring(0, 1500) : desc).append("\n\n");
+        }
+        sb.append("Claims to check:\n\n");
+        for (int i = 0; i < result.researchClaims.size(); i++) {
+            DeclickbaitResult.ResearchClaim c = result.researchClaims.get(i);
+            sb.append("Claim ").append(i + 1).append(" (at ").append(Transcript.formatTime(c.ms)).append("): ").append(c.claim)
+                    .append("\nCited as: ").append(c.citedAs)
+                    .append("\nTranscript around it:\n").append(c.context).append("\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Blocking; can take a minute or two. Always runs on Opus: the research pass leans on web search, and the
+     * Haiku setting is about keeping the per-video summary cheap.
+     */
+    public static DeclickbaitResult.ResearchCheck checkResearch(DeclickbaitPrefs prefs, VideoInfo info, DeclickbaitResult result)
+            throws ClaudeException {
+        if (!prefs.hasApiKey()) {
+            throw new ClaudeException("Add your Claude API key in Settings first.", true);
+        }
+        try {
+            JSONArray messages = new JSONArray().put(new JSONObject().put("role", "user").put("content", buildResearchText(info, result)));
+            JSONObject body = new JSONObject()
+                    .put("model", DeclickbaitPrefs.MODEL_OPUS)
+                    .put("max_tokens", 16000)
+                    .put("system", RESEARCH_PROMPT)
+                    .put("output_config", new JSONObject()
+                            .put("effort", "medium")
+                            .put("format", new JSONObject().put("type", "json_schema").put("schema", researchSchema())))
+                    .put("tools", new JSONArray()
+                            .put(new JSONObject().put("type", "web_search_20260209").put("name", "web_search").put("max_uses", 8))
+                            .put(new JSONObject().put("type", "web_fetch_20260209").put("name", "web_fetch").put("max_uses", 4)))
+                    .put("fallbacks", "default")
+                    .put("messages", messages);
+
+            JSONObject response = null;
+            for (int i = 0; i <= RESEARCH_MAX_CONTINUES; i++) {
+                try {
+                    response = post(prefs, body, researchClient());
+                } catch (ImageException e) {
+                    throw new ClaudeException("Claude returned an error: " + e.getMessage(), false);
+                }
+                // A long server-tool turn can pause; sending it back lets Claude carry on.
+                if (!"pause_turn".equals(response.optString("stop_reason"))) {
+                    break;
+                }
+                messages.put(new JSONObject().put("role", "assistant").put("content", response.optJSONArray("content")));
+                // Web tools filter results with code execution; carry its container over so the continuation can use it.
+                JSONObject container = response.optJSONObject("container");
+                if (container != null && !container.optString("id").isEmpty()) {
+                    body.put("container", container.optString("id"));
+                }
+            }
+
+            String stopReason = response.optString("stop_reason");
+            if ("pause_turn".equals(stopReason)) {
+                throw new ClaudeException("The research check took too long. Try again.", false);
+            }
+            if ("refusal".equals(stopReason)) {
+                throw new ClaudeException("Claude declined to check the research for this video.", false);
+            }
+            if ("max_tokens".equals(stopReason)) {
+                throw new ClaudeException("Claude's answer was cut off. Try again.", false);
+            }
+            return DeclickbaitResult.ResearchCheck.fromClaude(response.optString("model", DeclickbaitPrefs.MODEL_OPUS),
+                    new JSONObject(responseText(response)), result);
+        } catch (JSONException e) {
+            throw new ClaudeException("Couldn't read Claude's answer.", false);
+        }
     }
 
     /** Smallest possible request, for the "Test key" setting. Blocking. Returns null on success, else a message. */
