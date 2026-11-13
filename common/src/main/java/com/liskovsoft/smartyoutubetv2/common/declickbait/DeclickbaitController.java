@@ -42,6 +42,12 @@ public class DeclickbaitController extends BasePlayerController {
     private Disposable mResearchAction;
     /** Video the research check is running for. */
     private String mResearchVideoId;
+    /** Its progress so far, so a re-opened overlay can pick it up. Main thread only. */
+    private final List<String> mResearchSteps = new ArrayList<>();
+    private long mResearchStartedMs;
+    /** Bumped for every check and on cancel, so late steps from an older request are dropped. */
+    private int mResearchGeneration;
+    private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private DeclickbaitOverlay mOverlay;
     private MediaItemMetadata mMetadata;
     private VideoGroup mMomentsGroup;
@@ -307,15 +313,35 @@ public class DeclickbaitController extends BasePlayerController {
             return;
         }
         if (videoId.equals(mResearchVideoId) && RxHelper.isAnyActionRunning(mResearchAction)) {
-            return; // Re-opened while it runs: the overlay already shows progress, and the answer will reach it.
+            // Re-opened while it runs: show where it's up to; the answer will reach this overlay too.
+            if (isOverlayFor(videoId)) {
+                mOverlay.setResearchProgress(mResearchStartedMs, mResearchSteps);
+            }
+            return;
         }
         RxHelper.disposeActions(mResearchAction);
+        final int generation = ++mResearchGeneration;
         mResearchVideoId = videoId;
+        mResearchSteps.clear();
+        mResearchStartedMs = System.currentTimeMillis();
+        if (isOverlayFor(videoId)) {
+            mOverlay.setResearchProgress(mResearchStartedMs, mResearchSteps);
+        }
+        // Steps arrive on the request's thread; keep the list and the overlay on the main thread.
+        final ClaudeClient.ResearchProgress progress = step -> mMainHandler.post(() -> {
+            if (generation != mResearchGeneration || !RxHelper.isAnyActionRunning(mResearchAction)) {
+                return;
+            }
+            mResearchSteps.add(step);
+            if (isOverlayFor(videoId)) {
+                mOverlay.setResearchProgress(mResearchStartedMs, mResearchSteps);
+            }
+        });
         long durationMs = getPlayer() != null ? getPlayer().getDurationMs() : 0;
         final ClaudeClient.VideoInfo info = buildVideoInfo(videoId, durationMs);
         mResearchAction = RxHelper.<DeclickbaitResult.ResearchCheck>createLong(emitter -> {
             try {
-                emitter.onNext(ClaudeClient.checkResearch(mPrefs, info, result));
+                emitter.onNext(ClaudeClient.checkResearch(mPrefs, info, result, progress));
                 emitter.onComplete();
             } catch (ClaudeClient.ClaudeException e) {
                 emitter.tryOnError(e);
@@ -389,6 +415,7 @@ public class DeclickbaitController extends BasePlayerController {
     }
 
     private void cancelResearch() {
+        mResearchGeneration++;
         RxHelper.disposeActions(mResearchAction);
         mResearchVideoId = null;
     }

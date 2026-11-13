@@ -24,4 +24,7 @@ touches:
 - Videos usually say "trials show" without naming a paper. The check then names the likely source and says it is a guess; the prompt forbids inventing citations. A video that names its study gives a firmer match. That case has not been tested.
 - Tested end to end on one video (magnesium) with the app's prompts: the summary took 11 seconds, the check 40 seconds with 4 searches. The papers it found (Zhang 2016, Veronese 2016, Peikert 1996) match what I know of them; the links were not opened. Not yet run on a TV.
 
+- Progress comes from streaming the research request. With web_search_20260209, Claude writes a short program that runs several searches, so search and result blocks arrive in bursts when that code finishes (about 16 s and 31 s into a 35 s check), not one by one. The block that carries the program shows up around 10 s, hence the "Planning the searches" step, and the clock covers the quiet gaps.
+- The repo's Robolectric unit tests fail before any test code runs (NoClassDefFoundError: android/webkit/RoboCookieManager), the existing ones included. The stream parser was checked by compiling MessageStream and ResearchProgressSteps alone with javac and the org.json jar from the Gradle cache, then replaying a recorded stream.
+
 In the code: ClaudeClient.RESEARCH_PROMPT, researchSchema() and checkResearch() (its own OkHttp client with a 240-second read timeout, and a pause_turn loop); DeclickbaitResult.ResearchClaim and ResearchCheck (saved result VERSION 3); overlay research mode with Back returning to the summary.

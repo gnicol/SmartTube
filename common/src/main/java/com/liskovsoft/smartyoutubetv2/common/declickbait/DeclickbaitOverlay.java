@@ -3,6 +3,8 @@ package com.liskovsoft.smartyoutubetv2.common.declickbait;
 import android.app.Activity;
 import android.app.Dialog;
 import android.graphics.Typeface;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.TextUtils;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
@@ -10,6 +12,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.core.content.ContextCompat;
@@ -54,7 +57,7 @@ public class DeclickbaitOverlay {
     private final Button mSettingsButton;
     private final Button mCloseButton;
     private final View mOverview;
-    private final View mSummaryScroll;
+    private final ScrollView mSummaryScroll;
     private final View mRail;
     private final LinearLayout mMoments;
     private final TextView mHeadline;
@@ -64,6 +67,19 @@ public class DeclickbaitOverlay {
     /** Showing the research check (or its progress) instead of the summary. */
     private boolean mResearchMode;
     private boolean mResearchRunning;
+    private long mResearchStartedMs;
+    private final List<String> mResearchSteps = new ArrayList<>();
+    private final Handler mHandler = new Handler(Looper.getMainLooper());
+    /** Redraws the progress once a second, so the clock shows the check is alive between steps. */
+    private final Runnable mResearchTick = new Runnable() {
+        @Override
+        public void run() {
+            if (mResearchMode && mResearchRunning && mDialog.isShowing()) {
+                renderResearchProgress();
+                mHandler.postDelayed(this, 1000);
+            }
+        }
+    };
     /** The row that takes focus when the rail opens: where the title is answered at first, then the last one used. */
     private View mJumpFocus;
     private boolean mRailOpen;
@@ -78,7 +94,10 @@ public class DeclickbaitOverlay {
         View root = LayoutInflater.from(activity).inflate(R.layout.declickbait_overlay, null);
         mDialog.setContentView(root);
         mDialog.setCancelable(true);
-        mDialog.setOnDismissListener(dialog -> mListener.onClosed(!mQuiet));
+        mDialog.setOnDismissListener(dialog -> {
+            mHandler.removeCallbacks(mResearchTick);
+            mListener.onClosed(!mQuiet);
+        });
 
         mProgressPanel = root.findViewById(R.id.declickbait_progress_panel);
         mResultPanel = root.findViewById(R.id.declickbait_result_panel);
@@ -241,19 +260,43 @@ public class DeclickbaitOverlay {
             renderResearch(mResult.research);
             return;
         }
+        mResearchMode = true;
         if (!mResearchRunning) {
             mResearchRunning = true;
+            mResearchStartedMs = System.currentTimeMillis();
+            mResearchSteps.clear();
             mListener.onCheckResearch(mResult);
         }
-        showResearchProgress();
-    }
-
-    private void showResearchProgress() {
-        mResearchMode = true;
-        mHeadline.setText(R.string.declickbait_research_working);
-        mSummary.setText(R.string.declickbait_research_working_detail);
         updateResearchButton();
         mSummaryScroll.scrollTo(0, 0);
+        startResearchTick();
+    }
+
+    /** Where a running check is up to: called as steps arrive, and when a re-opened overlay joins one in progress. */
+    public void setResearchProgress(long startedMs, List<String> steps) {
+        if (mResult == null) {
+            return;
+        }
+        mResearchRunning = true;
+        mResearchStartedMs = startedMs;
+        mResearchSteps.clear();
+        mResearchSteps.addAll(steps);
+        updateResearchButton();
+        if (mResearchMode) {
+            startResearchTick();
+        }
+    }
+
+    private void startResearchTick() {
+        mHandler.removeCallbacks(mResearchTick);
+        mResearchTick.run();
+    }
+
+    /** "Checking the research…  0:23", then the steps so far, newest last and brightest. */
+    private void renderResearchProgress() {
+        long elapsed = Math.max(0, System.currentTimeMillis() - mResearchStartedMs);
+        mHeadline.setText(mActivity.getString(R.string.declickbait_research_working) + "  " + Transcript.formatTime(elapsed));
+        mSummary.setText(SummaryText.formatProgress(mActivity.getString(R.string.declickbait_research_working_detail), mResearchSteps));
     }
 
     /** The research check is ready: show it if the viewer is waiting on it, otherwise keep it for the button. */
@@ -271,6 +314,7 @@ public class DeclickbaitOverlay {
     }
 
     private void renderResearch(DeclickbaitResult.ResearchCheck check) {
+        mHandler.removeCallbacks(mResearchTick);
         mResearchMode = true;
         mHeadline.setText(R.string.declickbait_research_title);
         mSummary.setText(SummaryText.formatResearch(check));
@@ -289,6 +333,7 @@ public class DeclickbaitOverlay {
             return;
         }
         mResearchRunning = false;
+        mHandler.removeCallbacks(mResearchTick);
         if (mResearchMode) {
             mHeadline.setText(R.string.declickbait_research_title);
             mSummary.setText(message);
@@ -364,13 +409,19 @@ public class DeclickbaitOverlay {
                     mSummaryScroll.requestFocus();
                 }
                 return true;
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                // Nothing sits below the button, so down means "read on": move into the text and scroll it.
+                if (down) {
+                    mSummaryScroll.requestFocus();
+                    mSummaryScroll.arrowScroll(View.FOCUS_DOWN);
+                }
+                return true;
             case KeyEvent.KEYCODE_DPAD_RIGHT:
                 if (down && mJumpFocus != null) {
                     mJumpFocus.requestFocus();
                 }
                 return true;
             case KeyEvent.KEYCODE_DPAD_LEFT:
-            case KeyEvent.KEYCODE_DPAD_DOWN:
                 return true;
             default:
                 return false;

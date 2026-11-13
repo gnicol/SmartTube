@@ -10,8 +10,8 @@ The same moments appear as amber marks on the seekbar and a "✦ Key moments" ro
 When a video bases its advice on research ("trials show…", a named study), the summary ends with a
 **Check N research claims** button (down from the summary reaches it). It runs a second request, with web search,
 that looks up the paper behind each claim and shows what the paper actually found, whether the video matches or
-overstates it, and how strong the evidence is. It takes about a minute, always uses Opus (whatever the model setting),
-and is saved with the summary. Videos that don't lean on research, like interviews, get no button.
+overstates it, and how strong the evidence is. It takes about a minute, with a running clock and each search and the
+paper it found listed as they happen. It always uses Opus (whatever the model setting) and is saved with the summary. Videos that don't lean on research, like interviews, get no button.
 
 The goal is the substance of the video without sitting through it. Many videos aren't clickbait so much as
 slow to reach the point, so the summary comes first and the title check is the bonus.

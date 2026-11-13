@@ -6,7 +6,10 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -289,7 +292,11 @@ public class ClaudeClient {
         if (code == 200) {
             return new JSONObject(text);
         }
+        throw failForStatus(code, text, body);
+    }
 
+    /** The exception for a non-200 reply (an ImageException is thrown directly, so the caller can retry without it). */
+    private static ClaudeException failForStatus(int code, String text, JSONObject body) throws ImageException {
         String apiMessage = "";
         try {
             JSONObject error = new JSONObject(text).optJSONObject("error");
@@ -303,21 +310,54 @@ public class ClaudeClient {
             throw new ImageException(apiMessage);
         }
         if (code == 401) {
-            throw new ClaudeException("Claude rejected the API key. Check it in Settings.", true);
+            return new ClaudeException("Claude rejected the API key. Check it in Settings.", true);
         }
         if (code == 403) {
-            throw new ClaudeException("This API key isn't allowed to use " + body.optString("model") + ".", true);
+            return new ClaudeException("This API key isn't allowed to use " + body.optString("model") + ".", true);
         }
         if (code == 400 && apiMessage.toLowerCase().contains("credit")) {
-            throw new ClaudeException("Your Claude API account is out of credit.", true);
+            return new ClaudeException("Your Claude API account is out of credit.", true);
         }
         if (code == 429) {
-            throw new ClaudeException("Claude is rate limiting requests. Try again in a minute.", false);
+            return new ClaudeException("Claude is rate limiting requests. Try again in a minute.", false);
         }
         if (code == 529 || code >= 500) {
-            throw new ClaudeException("Claude is overloaded right now. Try again shortly.", false);
+            return new ClaudeException("Claude is overloaded right now. Try again shortly.", false);
         }
-        throw new ClaudeException("Claude returned an error (" + code + "): " + apiMessage, false);
+        return new ClaudeException("Claude returned an error (" + code + "): " + apiMessage, false);
+    }
+
+    /** Like post(), but streamed: the listener sees each content block as it arrives. */
+    private static JSONObject postStream(DeclickbaitPrefs prefs, JSONObject body, OkHttpClient httpClient,
+                                         MessageStream.Listener listener) throws ClaudeException, ImageException, JSONException {
+        Request.Builder request = new Request.Builder()
+                .url(URL)
+                .header("x-api-key", keyHeader(prefs))
+                .header("anthropic-version", API_VERSION)
+                .post(RequestBody.create(JSON, body.toString()));
+        if (body.has("fallbacks")) {
+            request.header("anthropic-beta", FALLBACK_BETA);
+        }
+
+        try (Response response = httpClient.newCall(request.build()).execute()) {
+            ResponseBody responseBody = response.body();
+            if (response.code() != 200) {
+                throw failForStatus(response.code(), responseBody != null ? responseBody.string() : "", body);
+            }
+            if (responseBody == null) {
+                throw new ClaudeException("Claude didn't return an answer.", false);
+            }
+            BufferedReader reader = new BufferedReader(new InputStreamReader(responseBody.byteStream(), Charset.forName("UTF-8")));
+            return MessageStream.read(reader, listener);
+        } catch (MessageStream.StreamError e) {
+            Log.e(TAG, "Claude stream error %s: %s", e.errorType, e.getMessage());
+            if ("overloaded_error".equals(e.errorType)) {
+                throw new ClaudeException("Claude is overloaded right now. Try again shortly.", false);
+            }
+            throw new ClaudeException("Claude stopped with an error: " + e.getMessage(), false);
+        } catch (IOException e) {
+            throw new ClaudeException("Lost the connection to Claude. Check the internet connection.", false);
+        }
     }
 
     static DeclickbaitResult parseResponse(DeclickbaitPrefs prefs, VideoInfo info, Transcript transcript, JSONObject response)
@@ -356,13 +396,25 @@ public class ClaudeClient {
 
     // --- Research check: the on-demand second pass ---
 
+    /** Steps of a running research check, for the progress screen. Called on the request's thread. */
+    public interface ResearchProgress {
+        void onStep(String step);
+    }
+
     /** Web search runs inside the request, so it can take a minute or two. */
     private static OkHttpClient sResearchClient;
     private static final int RESEARCH_MAX_CONTINUES = 4;
+    private static final long RESEARCH_CALL_TIMEOUT_S = 180;
+    /** Past this, don't start another continuation. */
+    private static final long RESEARCH_DEADLINE_MS = 5 * 60_000;
 
     private static synchronized OkHttpClient researchClient() {
         if (sResearchClient == null) {
-            sResearchClient = client().newBuilder().readTimeout(240, TimeUnit.SECONDS).build();
+            // Pings keep a stalled stream's reads alive, so cap each whole call as well.
+            sResearchClient = client().newBuilder()
+                    .readTimeout(120, TimeUnit.SECONDS)
+                    .callTimeout(RESEARCH_CALL_TIMEOUT_S, TimeUnit.SECONDS)
+                    .build();
         }
         return sResearchClient;
     }
@@ -418,8 +470,8 @@ public class ClaudeClient {
      * Blocking; can take a minute or two. Always runs on Opus: the research pass leans on web search, and the
      * Haiku setting is about keeping the per-video summary cheap.
      */
-    public static DeclickbaitResult.ResearchCheck checkResearch(DeclickbaitPrefs prefs, VideoInfo info, DeclickbaitResult result)
-            throws ClaudeException {
+    public static DeclickbaitResult.ResearchCheck checkResearch(DeclickbaitPrefs prefs, VideoInfo info, DeclickbaitResult result,
+                                                                ResearchProgress progress) throws ClaudeException {
         if (!prefs.hasApiKey()) {
             throw new ClaudeException("Add your Claude API key in Settings first.", true);
         }
@@ -436,12 +488,15 @@ public class ClaudeClient {
                             .put(new JSONObject().put("type", "web_search_20260209").put("name", "web_search").put("max_uses", 8))
                             .put(new JSONObject().put("type", "web_fetch_20260209").put("name", "web_fetch").put("max_uses", 4)))
                     .put("fallbacks", "default")
+                    .put("stream", true)
                     .put("messages", messages);
 
+            ResearchProgressSteps steps = new ResearchProgressSteps(progress);
+            long deadline = System.currentTimeMillis() + RESEARCH_DEADLINE_MS;
             JSONObject response = null;
-            for (int i = 0; i <= RESEARCH_MAX_CONTINUES; i++) {
+            for (int i = 0; i <= RESEARCH_MAX_CONTINUES && (i == 0 || System.currentTimeMillis() < deadline); i++) {
                 try {
-                    response = post(prefs, body, researchClient());
+                    response = postStream(prefs, body, researchClient(), steps);
                 } catch (ImageException e) {
                     throw new ClaudeException("Claude returned an error: " + e.getMessage(), false);
                 }

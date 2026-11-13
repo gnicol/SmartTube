@@ -8,7 +8,7 @@
     <string name="declickbait_research_back">Back to summary</string>
     <string name="declickbait_research_title">What the research says</string>
     <string name="declickbait_research_working">Checking the research…</string>
-    <string name="declickbait_research_working_detail">Looking up the papers behind these claims. This takes about a minute; you can go back to the summary meanwhile.</string>
+    <string name="declickbait_research_working_detail">Looking up the papers behind these claims. This takes about a minute.</string>
     <string name="declickbait_title_supported">Title holds up.</string>
     <string name="declickbait_title_partly">Title partly holds up.</string>
     <string name="declickbait_title_unsupported">Title doesn\'t hold up.</string>

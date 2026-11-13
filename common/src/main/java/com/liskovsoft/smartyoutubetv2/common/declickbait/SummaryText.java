@@ -113,6 +113,25 @@ class SummaryText {
         return out;
     }
 
+    /** The research progress: what is happening, then the steps so far with the newest one brightest. */
+    static CharSequence formatProgress(String intro, java.util.List<String> steps) {
+        SpannableStringBuilder out = new SpannableStringBuilder();
+        int start = out.length();
+        out.append(intro);
+        out.setSpan(new ForegroundColorSpan(COLOR_FOOTNOTE), start, out.length(), FLAGS);
+        for (int i = 0; i < steps.size(); i++) {
+            startBlock(out, i > 0);
+            boolean newest = i == steps.size() - 1;
+            start = out.length();
+            out.append(newest ? "▸  " : "✓  ").append(steps.get(i));
+            out.setSpan(new ForegroundColorSpan(newest ? COLOR_STRONG : COLOR_FOOTNOTE), start, out.length(), FLAGS);
+            if (newest) {
+                out.setSpan(new StyleSpan(Typeface.BOLD), start, out.length(), FLAGS);
+            }
+        }
+        return out;
+    }
+
     private static void line(SpannableStringBuilder out, String lead, String text, int color) {
         if (text == null || text.isEmpty()) {
             return;
