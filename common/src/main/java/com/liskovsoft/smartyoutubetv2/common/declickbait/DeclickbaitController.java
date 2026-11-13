@@ -55,7 +55,17 @@ public class DeclickbaitController extends BasePlayerController {
     public void onNewVideo(Video item) {
         cancel();
         mMetadata = null;
-        removeMomentsRow();
+        // SuggestionsController clears every suggestion row (ours included) when the new video's
+        // metadata arrives. Removing it here as well crashed the app mid-transition on the bedroom stick.
+        mMomentsGroup = null;
+    }
+
+    @Override
+    public void onPlay() {
+        // Keep the video paused while the overlay is up, whatever else tries to resume it.
+        if (mOverlay != null && mOverlay.isShowing() && getPlayer() != null) {
+            getPlayer().setPlayWhenReady(false);
+        }
     }
 
     @Override
@@ -134,8 +144,17 @@ public class DeclickbaitController extends BasePlayerController {
 
             @Override
             public void onRevealed(DeclickbaitResult result) {
-                showMomentsRow(result);
-                showSeekBarMarkers(result);
+                // Extras only: never let them take the player down.
+                try {
+                    showMomentsRow(result);
+                } catch (RuntimeException e) {
+                    Log.e(TAG, "Key moments row failed: %s", e);
+                }
+                try {
+                    showSeekBarMarkers(result);
+                } catch (RuntimeException e) {
+                    Log.e(TAG, "Seekbar marks failed: %s", e);
+                }
             }
         });
 
@@ -193,7 +212,9 @@ public class DeclickbaitController extends BasePlayerController {
         }
         mTranscriptAction = RxHelper.fromCallable(() -> TranscriptFetcher.fetch(url)).subscribe(
                 transcript -> onTranscript(videoId, transcript),
-                error -> fail("Couldn't download the captions.", false, error)
+                error -> fail("Couldn't download the captions ("
+                        + (error instanceof TranscriptFetcher.FetchException ? error.getMessage() : error.getClass().getSimpleName())
+                        + ").", false, error)
         );
     }
 
@@ -304,7 +325,6 @@ public class DeclickbaitController extends BasePlayerController {
         // Chapters-style rows sort by time.
         java.util.Collections.sort(cards, (a, b) -> a.startTimeMs < b.startTimeMs ? -1 : (a.startTimeMs == b.startTimeMs ? 0 : 1));
 
-        removeMomentsRow();
         VideoGroup group = VideoGroup.from(cards);
         group.setTitle(getContext().getString(R.string.declickbait_moments_row));
         group.setId(MOMENTS_GROUP_ID);
@@ -324,13 +344,6 @@ public class DeclickbaitController extends BasePlayerController {
         card.badge = Transcript.formatTime(ms);
         card.cardImageUrl = source.cardImageUrl;
         return card;
-    }
-
-    private void removeMomentsRow() {
-        if (mMomentsGroup != null && getPlayer() != null) {
-            getPlayer().removeSuggestions(mMomentsGroup);
-        }
-        mMomentsGroup = null;
     }
 
     private void showSeekBarMarkers(DeclickbaitResult result) {

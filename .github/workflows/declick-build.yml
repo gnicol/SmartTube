@@ -6,6 +6,10 @@ name: SmartTube ✦ release
 on:
   push:
     branches: [ declickbait ]
+    # Docs and session notes don't need a release (and an update prompt on every TV).
+    paths-ignore:
+      - '**.md'
+      - '.trail/**'
   workflow_dispatch:
 
 permissions:
