@@ -1,10 +1,14 @@
 # SmartTube ✦ (de-clickbait fork)
 
-A side-by-side build of SmartTube with one extra player button, **✦ De-clickbait**. Press it on a video
-with a teasing title ("THIS Is the #1 Food Linked to…") and Claude reads the transcript, lets you guess,
-then shows the answer, a one-line check of the title's claims, and moments worth watching. Pick a moment
-to jump there. After the reveal the moments also appear as amber marks on the seekbar and a
-"✦ Key moments" row under the player.
+A side-by-side build of SmartTube with one extra player button, **✦ De-clickbait**. Press it on a long
+video, or one with a teasing title ("THIS Is the #1 Food Linked to…"), and Claude reads the transcript and
+shows an overview: a headline that answers the title and thumbnail, then a summary to read (up and down
+scroll it), ending with a one-line check of whether the title holds up. Moments worth jumping to peek in
+from the right edge: press right to slide them out, OK to jump, left or Back to return to the overview.
+The same moments appear as amber marks on the seekbar and a "✦ Key moments" row under the player.
+
+The goal is the substance of the video without sitting through it. Many videos aren't clickbait so much as
+slow to reach the point, so the summary comes first and the title check is the bonus.
 
 It installs next to stock SmartTube (`org.smarttube.stable.declick`, launcher name "SmartTube ✦"),
 so the original stays as a fallback.
@@ -29,8 +33,8 @@ backup folder, so copy the backup across with ADB:
 
 On Android 7–10 (the bedroom stick) both apps use `/sdcard/data/<package>/Backup`, so step 2 is usually unnecessary.
 
-Other settings: model (Opus 5.5 by default, Haiku 5.5 cheaper), "guess before showing the answer",
-hide the button, clear saved answers. Answers are saved per video, so re-opening one is instant and free.
+Other settings: model (Opus 5.5 by default, Haiku 5.5 cheaper), hide the button, clear saved summaries.
+Summaries are saved per video, so re-opening one is instant and free.
 
 The key is stored in Android's `no_backup` folder, which SmartTube's Google Drive backup and Android's
 own backup both skip.

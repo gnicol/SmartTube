@@ -10,129 +10,111 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/** What Claude found for one video, with every timestamp snapped to a real transcript line. */
+/** What Claude found for one video: an overview to read, and separate moments to jump to. */
 public class DeclickbaitResult {
-    public static final String FOUND_CLEAR = "clear";
-    public static final String FOUND_PARTIAL = "partial";
-    public static final String FOUND_NOT_FOUND = "not_found";
+    public static final String SUPPORTED_YES = "yes";
+    public static final String SUPPORTED_PARTLY = "partly";
+    public static final String SUPPORTED_NO = "no";
+    /** Bumped when the saved shape changes, so results saved by an older build are asked for again. */
+    private static final int VERSION = 2;
 
+    /** A place worth jumping to, snapped to a real transcript line. */
     public static class Moment {
         public final long ms;
+        /** Terse: it is also the card title in the player's Key moments row. */
         public final String label;
+        /** Where the title's promise is delivered. */
+        public final boolean answersTitle;
 
-        public Moment(long ms, String label) {
+        public Moment(long ms, String label, boolean answersTitle) {
             this.ms = ms;
             this.label = label;
+            this.answersTitle = answersTitle;
         }
     }
 
     public String videoId;
     public String model;
-    public String tease;
-    public String answer;
-    public String answerDetail;
+    /** The answer the title teases, or the video's main takeaway. */
+    public String headline;
+    /** Claude's overview in limited Markdown; see {@link SummaryText}. */
     public String summary;
     public String titleCheck;
-    public String found;
-    /** -1 when the answer isn't in the video. */
-    public long answerAtMs = -1;
-    /** Extra moments worth watching, in time order. The answer itself is not repeated here. */
+    public String titleSupported;
+    /** In time order. */
     public final List<Moment> moments = new ArrayList<>();
-    public final List<String> decoys = new ArrayList<>();
     public int wordCount;
     public long durationMs;
-
-    public boolean isAnswerFound() {
-        return !FOUND_NOT_FOUND.equals(found) && answerAtMs >= 0;
-    }
 
     /** Parse Claude's structured output. */
     static DeclickbaitResult fromClaude(String videoId, String model, JSONObject json, Transcript transcript) {
         DeclickbaitResult result = new DeclickbaitResult();
         result.videoId = videoId;
         result.model = model;
-        result.tease = json.optString("tease");
-        result.answer = json.optString("answer");
-        result.answerDetail = json.optString("answer_detail");
+        result.headline = json.optString("headline");
         result.summary = json.optString("summary");
         result.titleCheck = json.optString("title_check");
-        result.found = json.optString("found", FOUND_CLEAR);
-        result.answerAtMs = transcript.snapToLine(json.optString("answer_at"));
+        result.titleSupported = json.optString("title_supported", SUPPORTED_PARTLY);
         result.wordCount = transcript.getWordCount();
 
         JSONArray moments = json.optJSONArray("moments");
         if (moments != null) {
+            boolean answerSeen = false;
             for (int i = 0; i < moments.length(); i++) {
                 JSONObject m = moments.optJSONObject(i);
                 if (m == null) continue;
                 long ms = transcript.snapToLine(m.optString("at"));
                 String label = m.optString("label");
-                // Drop invalid stamps and anything that just repeats the answer's position.
-                if (ms < 0 || label.isEmpty() || Math.abs(ms - result.answerAtMs) < Transcript.GROUP_MS) continue;
-                result.moments.add(new Moment(ms, label));
+                // A jump with no readable time or no name is no use.
+                if (ms < 0 || label.isEmpty()) continue;
+                boolean answersTitle = m.optBoolean("answers_title") && !answerSeen;
+                answerSeen |= answersTitle;
+                result.moments.add(new Moment(ms, label, answersTitle));
             }
         }
         Collections.sort(result.moments, (a, b) -> a.ms < b.ms ? -1 : (a.ms == b.ms ? 0 : 1));
-
-        JSONArray decoys = json.optJSONArray("decoys");
-        if (decoys != null) {
-            for (int i = 0; i < decoys.length(); i++) {
-                String d = decoys.optString(i);
-                if (!d.isEmpty()) result.decoys.add(d);
-            }
-        }
         return result;
     }
 
     JSONObject toJson() throws JSONException {
         JSONObject json = new JSONObject();
+        json.put("v", VERSION);
         json.put("videoId", videoId);
         json.put("model", model);
-        json.put("tease", tease);
-        json.put("answer", answer);
-        json.put("answerDetail", answerDetail);
+        json.put("headline", headline);
         json.put("summary", summary);
         json.put("titleCheck", titleCheck);
-        json.put("found", found);
-        json.put("answerAtMs", answerAtMs);
+        json.put("titleSupported", titleSupported);
         json.put("wordCount", wordCount);
         json.put("durationMs", durationMs);
         JSONArray moments = new JSONArray();
         for (Moment m : this.moments) {
-            moments.put(new JSONObject().put("ms", m.ms).put("label", m.label));
+            moments.put(new JSONObject().put("ms", m.ms).put("label", m.label).put("answersTitle", m.answersTitle));
         }
         json.put("moments", moments);
-        json.put("decoys", new JSONArray(decoys));
         return json;
     }
 
     @Nullable
     static DeclickbaitResult fromJson(JSONObject json) {
-        if (json == null || json.optString("answer").isEmpty()) {
+        if (json == null || json.optInt("v") != VERSION || json.optString("headline").isEmpty()) {
             return null;
         }
         DeclickbaitResult result = new DeclickbaitResult();
         result.videoId = json.optString("videoId");
         result.model = json.optString("model");
-        result.tease = json.optString("tease");
-        result.answer = json.optString("answer");
-        result.answerDetail = json.optString("answerDetail");
+        result.headline = json.optString("headline");
         result.summary = json.optString("summary");
         result.titleCheck = json.optString("titleCheck");
-        result.found = json.optString("found", FOUND_CLEAR);
-        result.answerAtMs = json.optLong("answerAtMs", -1);
+        result.titleSupported = json.optString("titleSupported", SUPPORTED_PARTLY);
         result.wordCount = json.optInt("wordCount");
         result.durationMs = json.optLong("durationMs");
         JSONArray moments = json.optJSONArray("moments");
         if (moments != null) {
             for (int i = 0; i < moments.length(); i++) {
                 JSONObject m = moments.optJSONObject(i);
-                if (m != null) result.moments.add(new Moment(m.optLong("ms"), m.optString("label")));
+                if (m != null) result.moments.add(new Moment(m.optLong("ms"), m.optString("label"), m.optBoolean("answersTitle")));
             }
-        }
-        JSONArray decoys = json.optJSONArray("decoys");
-        if (decoys != null) {
-            for (int i = 0; i < decoys.length(); i++) result.decoys.add(decoys.optString(i));
         }
         return result;
     }

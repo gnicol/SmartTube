@@ -3,7 +3,8 @@ package com.liskovsoft.smartyoutubetv2.common.declickbait;
 import android.app.Activity;
 import android.app.Dialog;
 import android.graphics.Typeface;
-import android.view.Gravity;
+import android.text.TextUtils;
+import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.Button;
@@ -16,42 +17,49 @@ import androidx.core.content.ContextCompat;
 import com.liskovsoft.smartyoutubetv2.common.R;
 
 /**
- * Full-screen wash over the paused video. Opens straight into guessing while the transcript is read
- * and Claude works; Reveal lights up when the answer is ready. Nothing spoilery shows before Reveal.
+ * Full-screen wash over the paused video. Shows progress while the transcript is read and Claude works, then the
+ * overview to read. The moments to jump to wait in a rail that peeks in from the right edge and slides out over
+ * the text when focus moves into it.
  */
 public class DeclickbaitOverlay {
+    /** How much of the rail stays on screen while the overview has focus: its times and the start of each label. */
+    private static final int RAIL_PEEK_DP = 150;
+    private static final float OVERVIEW_DIMMED = 0.35f;
+    private static final int SLIDE_MS = 180;
+
     public interface Listener {
         void onJump(long positionMs);
-        /** @param userClosed closed with Back / Close / Not now (not by a jump, Settings, or the app tearing it down) */
+        /** @param userClosed closed with Back / Close (not by a jump, Settings, or the app tearing it down) */
         void onClosed(boolean userClosed);
         void onOpenSettings();
-        void onRevealed(DeclickbaitResult result);
+        void onResultShown(DeclickbaitResult result);
     }
 
     private final Activity mActivity;
     private final Dialog mDialog;
     private final Listener mListener;
-    private final boolean mGuessFirst;
-    private final View mGuessPanel;
-    private final View mAnswerPanel;
-    private final TextView mKicker;
-    private final TextView mPrompt;
+    private final View mProgressPanel;
+    private final View mResultPanel;
     private final ProgressBar mSpinner1;
     private final TextView mStatus1;
     private final View mStatus2Row;
     private final ProgressBar mSpinner2;
     private final TextView mStatus2;
-    private final Button mRevealButton;
     private final Button mSettingsButton;
     private final Button mCloseButton;
-    private DeclickbaitResult mResult;
+    private final View mOverview;
+    private final View mSummaryScroll;
+    private final View mRail;
+    private final LinearLayout mMoments;
+    /** The row that takes focus when the rail opens: where the title is answered at first, then the last one used. */
+    private View mJumpFocus;
+    private boolean mRailOpen;
     /** Set when the overlay closes for a reason other than the person dismissing it. */
     private boolean mQuiet;
 
-    private DeclickbaitOverlay(Activity activity, String videoTitle, boolean guessFirst, Listener listener) {
+    private DeclickbaitOverlay(Activity activity, String videoTitle, Listener listener) {
         mActivity = activity;
         mListener = listener;
-        mGuessFirst = guessFirst;
 
         mDialog = new Dialog(activity, android.R.style.Theme_Translucent_NoTitleBar_Fullscreen);
         View root = LayoutInflater.from(activity).inflate(R.layout.declickbait_overlay, null);
@@ -59,37 +67,38 @@ public class DeclickbaitOverlay {
         mDialog.setCancelable(true);
         mDialog.setOnDismissListener(dialog -> mListener.onClosed(!mQuiet));
 
-        mGuessPanel = root.findViewById(R.id.declickbait_guess_panel);
-        mAnswerPanel = root.findViewById(R.id.declickbait_answer_panel);
-        mKicker = root.findViewById(R.id.declickbait_kicker);
-        mPrompt = root.findViewById(R.id.declickbait_prompt);
+        mProgressPanel = root.findViewById(R.id.declickbait_progress_panel);
+        mResultPanel = root.findViewById(R.id.declickbait_result_panel);
         mSpinner1 = root.findViewById(R.id.declickbait_spinner1);
         mStatus1 = root.findViewById(R.id.declickbait_status1);
         mStatus2Row = root.findViewById(R.id.declickbait_status2_row);
         mSpinner2 = root.findViewById(R.id.declickbait_spinner2);
         mStatus2 = root.findViewById(R.id.declickbait_status2);
-        mRevealButton = root.findViewById(R.id.declickbait_reveal);
         mSettingsButton = root.findViewById(R.id.declickbait_settings);
         mCloseButton = root.findViewById(R.id.declickbait_close);
+        mOverview = root.findViewById(R.id.declickbait_overview);
+        mSummaryScroll = root.findViewById(R.id.declickbait_summary_scroll);
+        mRail = root.findViewById(R.id.declickbait_rail);
+        mMoments = root.findViewById(R.id.declickbait_moments);
 
         ((TextView) root.findViewById(R.id.declickbait_video_title)).setText(videoTitle);
 
-        if (!guessFirst) {
-            mKicker.setText(R.string.declickbait_kicker_working);
-            mPrompt.setVisibility(View.GONE);
-            mRevealButton.setVisibility(View.GONE);
-        }
-
-        mRevealButton.setOnClickListener(v -> reveal());
         mCloseButton.setOnClickListener(v -> dismiss());
         mSettingsButton.setOnClickListener(v -> {
             dismissQuietly();
             mListener.onOpenSettings();
         });
+
+        mSummaryScroll.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) {
+                setRailOpen(false);
+            }
+        });
+        mSummaryScroll.setOnKeyListener(this::onOverviewKey);
     }
 
-    public static DeclickbaitOverlay show(Activity activity, String videoTitle, boolean guessFirst, Listener listener) {
-        DeclickbaitOverlay overlay = new DeclickbaitOverlay(activity, videoTitle, guessFirst, listener);
+    public static DeclickbaitOverlay show(Activity activity, String videoTitle, Listener listener) {
+        DeclickbaitOverlay overlay = new DeclickbaitOverlay(activity, videoTitle, listener);
         overlay.mDialog.show();
         overlay.mCloseButton.requestFocus();
         return overlay;
@@ -123,24 +132,10 @@ public class DeclickbaitOverlay {
     }
 
     /** Second status line: Claude working. */
-    public void setAnswerStatus(String text, boolean done) {
+    public void setSummaryStatus(String text, boolean done) {
         mStatus2Row.setVisibility(View.VISIBLE);
         mStatus2.setText(done ? "✓  " + text : text);
         mSpinner2.setVisibility(done ? View.GONE : View.VISIBLE);
-    }
-
-    public void setAnswerReady(DeclickbaitResult result) {
-        mResult = result;
-        if (!mGuessFirst) {
-            reveal();
-            return;
-        }
-        if (result.tease != null && !result.tease.isEmpty()) {
-            mPrompt.setText(result.tease);
-        }
-        setAnswerStatus("Answer ready", true);
-        mRevealButton.setEnabled(true);
-        mRevealButton.requestFocus();
     }
 
     public void setError(String message, boolean offerSettings) {
@@ -149,8 +144,6 @@ public class DeclickbaitOverlay {
         mSpinner2.setVisibility(View.GONE);
         mStatus2.setTextColor(0xFFFF8A80);
         mStatus2.setText(message);
-        mRevealButton.setVisibility(View.GONE);
-        mCloseButton.setText(R.string.declickbait_close);
         if (offerSettings) {
             mSettingsButton.setVisibility(View.VISIBLE);
             mSettingsButton.requestFocus();
@@ -159,85 +152,152 @@ public class DeclickbaitOverlay {
         }
     }
 
-    private void reveal() {
-        if (mResult == null) {
-            return;
-        }
-        DeclickbaitResult r = mResult;
-        View root = mAnswerPanel;
-
-        ((TextView) root.findViewById(R.id.declickbait_answer)).setText(
-                r.isAnswerFound() ? r.answer : mActivity.getString(R.string.declickbait_not_found));
-        setTextOrHide(root.findViewById(R.id.declickbait_answer_detail), r.isAnswerFound() ? r.answerDetail : null);
-        setTextOrHide(root.findViewById(R.id.declickbait_summary), r.summary);
-        TextView check = root.findViewById(R.id.declickbait_title_check);
-        check.setText(r.titleCheck);
-
-        LinearLayout moments = root.findViewById(R.id.declickbait_moments);
-        moments.removeAllViews();
-        View first = null;
-        if (r.isAnswerFound()) {
-            first = addMoment(moments, r.answerAtMs, "The answer: " + r.answer);
-        }
-        for (DeclickbaitResult.Moment m : r.moments) {
-            View row = addMoment(moments, m.ms, m.label);
-            if (first == null) first = row;
-        }
-
-        mGuessPanel.setVisibility(View.GONE);
-        mAnswerPanel.setVisibility(View.VISIBLE);
-        if (first != null) {
-            first.requestFocus();
-        }
-        mListener.onRevealed(r);
-    }
-
-    private static void setTextOrHide(TextView view, String text) {
-        if (text == null || text.isEmpty()) {
-            view.setVisibility(View.GONE);
-        } else {
-            view.setVisibility(View.VISIBLE);
-            view.setText(text);
-        }
-    }
-
-    private View addMoment(LinearLayout parent, long ms, String label) {
+    public void showResult(DeclickbaitResult r) {
         float density = mActivity.getResources().getDisplayMetrics().density;
 
+        ((TextView) mResultPanel.findViewById(R.id.declickbait_headline)).setText(r.headline);
+        // The title check rides at the end of the summary, so it costs no height of its own.
+        ((TextView) mResultPanel.findViewById(R.id.declickbait_summary)).setText(
+                SummaryText.format(r.summary, mActivity.getString(verdictText(r)), r.titleCheck, density));
+
+        mMoments.removeAllViews();
+        mJumpFocus = null;
+        for (DeclickbaitResult.Moment m : r.moments) {
+            View row = addMoment(m, density);
+            if (mJumpFocus == null && m.answersTitle) {
+                mJumpFocus = row;
+            }
+        }
+        if (mJumpFocus == null && mMoments.getChildCount() > 0) {
+            mJumpFocus = mMoments.getChildAt(0);
+        }
+
+        mRailOpen = false;
+        mRail.setVisibility(mJumpFocus != null ? View.VISIBLE : View.GONE);
+        mRail.setTranslationX(railClosedX());
+        mOverview.setAlpha(1f);
+
+        mProgressPanel.setVisibility(View.GONE);
+        mResultPanel.setVisibility(View.VISIBLE);
+        mSummaryScroll.requestFocus();
+        mListener.onResultShown(r);
+    }
+
+    private static int verdictText(DeclickbaitResult r) {
+        if (DeclickbaitResult.SUPPORTED_YES.equals(r.titleSupported)) {
+            return R.string.declickbait_title_supported;
+        }
+        if (DeclickbaitResult.SUPPORTED_NO.equals(r.titleSupported)) {
+            return R.string.declickbait_title_unsupported;
+        }
+        return R.string.declickbait_title_partly;
+    }
+
+    // --- Focus: the overview scrolls with up/down; right opens the rail; left or Back returns to the overview ---
+
+    private boolean onOverviewKey(View v, int keyCode, KeyEvent event) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                if (event.getAction() == KeyEvent.ACTION_DOWN && mJumpFocus != null) {
+                    mJumpFocus.requestFocus();
+                }
+                return true;
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                return true;
+            // The ScrollView scrolls itself. At either end stop here, or focus search wanders into the rail.
+            case KeyEvent.KEYCODE_DPAD_UP:
+                return !v.canScrollVertically(-1);
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                return !v.canScrollVertically(1);
+            default:
+                return false;
+        }
+    }
+
+    private boolean onMomentKey(View row, int keyCode, KeyEvent event) {
+        boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                if (down) {
+                    mSummaryScroll.requestFocus();
+                }
+                return true;
+            case KeyEvent.KEYCODE_BACK:
+                // Back steps out of the rail first; from the overview it closes the overlay.
+                if (!down) {
+                    mSummaryScroll.requestFocus();
+                }
+                return true;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                return true;
+            case KeyEvent.KEYCODE_DPAD_UP:
+                return mMoments.indexOfChild(row) == 0;
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                return mMoments.indexOfChild(row) == mMoments.getChildCount() - 1;
+            default:
+                return false;
+        }
+    }
+
+    private float railClosedX() {
+        float density = mActivity.getResources().getDisplayMetrics().density;
+        return mRail.getLayoutParams().width - RAIL_PEEK_DP * density;
+    }
+
+    /** Slides the rail over the text rather than squeezing the text, so nothing has to be laid out again. */
+    private void setRailOpen(boolean open) {
+        if (mRailOpen == open) {
+            return;
+        }
+        mRailOpen = open;
+        mRail.animate().translationX(open ? 0 : railClosedX()).setDuration(SLIDE_MS).start();
+        mOverview.animate().alpha(open ? OVERVIEW_DIMMED : 1f).setDuration(SLIDE_MS).start();
+    }
+
+    private View addMoment(DeclickbaitResult.Moment moment, float density) {
+        // Baseline-aligned (the LinearLayout default), so the time lines up with the first line of a wrapped label.
         LinearLayout row = new LinearLayout(mActivity);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
         row.setFocusable(true);
         row.setClickable(true);
         row.setBackgroundResource(R.drawable.declickbait_moment_bg);
-        int padH = (int) (14 * density), padV = (int) (11 * density);
+        int padH = (int) (12 * density), padV = (int) (9 * density);
         row.setPadding(padH, padV, padH, padV);
 
         TextView time = new TextView(mActivity);
-        time.setText(Transcript.formatTime(ms));
-        time.setTextSize(17);
+        time.setText(Transcript.formatTime(moment.ms));
+        time.setTextSize(16);
         time.setTypeface(Typeface.DEFAULT_BOLD);
         time.setTextColor(ContextCompat.getColorStateList(mActivity, R.color.declickbait_moment_time));
-        time.setMinWidth((int) (64 * density));
+        time.setMinWidth((int) (56 * density));
         time.setDuplicateParentStateEnabled(true);
 
-        TextView text = new TextView(mActivity);
-        text.setText(label);
-        text.setTextSize(16);
-        text.setTextColor(ContextCompat.getColorStateList(mActivity, R.color.declickbait_button_text));
-        text.setDuplicateParentStateEnabled(true);
+        TextView label = new TextView(mActivity);
+        label.setText(moment.answersTitle ? "✦ " + moment.label : moment.label);
+        label.setTextSize(16);
+        label.setMaxLines(2);
+        label.setEllipsize(TextUtils.TruncateAt.END);
+        label.setTextColor(ContextCompat.getColorStateList(mActivity, R.color.declickbait_button_text));
+        label.setDuplicateParentStateEnabled(true);
 
         row.addView(time);
-        row.addView(text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(label, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         row.setOnClickListener(v -> {
             dismissQuietly();
-            mListener.onJump(ms);
+            mListener.onJump(moment.ms);
+        });
+        row.setOnKeyListener(this::onMomentKey);
+        row.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) {
+                mJumpFocus = v;
+                setRailOpen(true);
+            }
         });
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = (int) (8 * density);
-        parent.addView(row, lp);
+        lp.bottomMargin = (int) (6 * density);
+        mMoments.addView(row, lp);
         return row;
     }
 }

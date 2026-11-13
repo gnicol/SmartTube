@@ -17,7 +17,7 @@ import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.Comparator;
 
-/** Saved answers, one small JSON file per video in the app's cache folder (never backed up). */
+/** Saved results, one small JSON file per video in the app's cache folder (never backed up). */
 public class DeclickbaitCache {
     private static final int MAX_ENTRIES = 300;
     private static final Charset UTF8 = Charset.forName("UTF-8");

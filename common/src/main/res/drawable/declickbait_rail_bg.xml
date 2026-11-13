@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Backdrop of the jump rail: fades in from clear at its left edge so it reads as sliding over the text. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient
+        android:angle="0"
+        android:centerColor="#F5070A0F"
+        android:centerX="0.08"
+        android:endColor="#F5070A0F"
+        android:startColor="#00070A0F" />
+</shape>

@@ -38,7 +38,6 @@ public class DeclickbaitPrefs {
     private final File mFile;
     private String mApiKey;
     private String mModel = MODEL_OPUS;
-    private boolean mGuessFirst = true;
     private boolean mButtonEnabled = true;
 
     private DeclickbaitPrefs(Context context) {
@@ -103,15 +102,6 @@ public class DeclickbaitPrefs {
         return MODEL_HAIKU.equals(mModel) ? "medium" : "low";
     }
 
-    public synchronized boolean isGuessFirst() {
-        return mGuessFirst;
-    }
-
-    public synchronized void setGuessFirst(boolean guessFirst) {
-        mGuessFirst = guessFirst;
-        save();
-    }
-
     public synchronized boolean isButtonEnabled() {
         return mButtonEnabled;
     }
@@ -137,7 +127,6 @@ public class DeclickbaitPrefs {
             JSONObject json = new JSONObject(new String(data, 0, read, UTF8));
             mApiKey = json.optString("apiKey", null);
             mModel = json.optString("model", MODEL_OPUS);
-            mGuessFirst = json.optBoolean("guessFirst", true);
             mButtonEnabled = json.optBoolean("buttonEnabled", true);
         } catch (IOException | JSONException e) {
             Log.e(TAG, "Can't read settings: %s", e.getMessage());
@@ -149,7 +138,6 @@ public class DeclickbaitPrefs {
             JSONObject json = new JSONObject();
             json.put("apiKey", mApiKey);
             json.put("model", mModel);
-            json.put("guessFirst", mGuessFirst);
             json.put("buttonEnabled", mButtonEnabled);
 
             File parent = mFile.getParentFile();

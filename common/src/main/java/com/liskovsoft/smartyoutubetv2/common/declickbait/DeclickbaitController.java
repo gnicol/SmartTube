@@ -32,6 +32,7 @@ public class DeclickbaitController extends BasePlayerController {
     private static final String TAG = DeclickbaitController.class.getSimpleName();
     private static final int MOMENTS_GROUP_ID = "declickbait_moments".hashCode();
     private static final int MARKER_COLOR = 0xFFF5B83D;
+    private static final String SUMMARY_STATUS = "Summarizing the video…";
 
     private MediaItemService mMediaItemService;
     private DeclickbaitPrefs mPrefs;
@@ -143,7 +144,7 @@ public class DeclickbaitController extends BasePlayerController {
         getPlayer().setPlayWhenReady(false);
         getPlayer().showControls(false);
 
-        self[0] = DeclickbaitOverlay.show(activity, video.getTitle(), mPrefs.isGuessFirst(), new DeclickbaitOverlay.Listener() {
+        self[0] = DeclickbaitOverlay.show(activity, video.getTitle(), new DeclickbaitOverlay.Listener() {
             @Override
             public void onJump(long positionMs) {
                 if (getPlayer() != null && isCurrentVideo(videoId)) {
@@ -169,7 +170,7 @@ public class DeclickbaitController extends BasePlayerController {
             }
 
             @Override
-            public void onRevealed(DeclickbaitResult result) {
+            public void onResultShown(DeclickbaitResult result) {
                 // Extras only: never let them take the player down.
                 try {
                     showMomentsRow(result);
@@ -192,8 +193,8 @@ public class DeclickbaitController extends BasePlayerController {
 
         DeclickbaitResult cached = DeclickbaitCache.get(getContext(), videoId);
         if (cached != null) {
-            mOverlay.setTranscriptStatus("Saved answer", true);
-            mOverlay.setAnswerReady(cached);
+            mOverlay.setTranscriptStatus("Saved summary", true);
+            mOverlay.showResult(cached);
             return;
         }
 
@@ -201,7 +202,7 @@ public class DeclickbaitController extends BasePlayerController {
             // Re-opened while a request is still running: show where it's up to; the callbacks finish the job.
             mOverlay.setTranscriptStatus(mTranscriptStatus, mTranscriptDone);
             if (mTranscriptDone) {
-                mOverlay.setAnswerStatus("Finding the answer…", false);
+                mOverlay.setSummaryStatus(SUMMARY_STATUS, false);
             }
             return;
         }
@@ -261,7 +262,7 @@ public class DeclickbaitController extends BasePlayerController {
         setTranscriptStatus(String.format("Transcript: %s, %,d words",
                 Transcript.formatTime(durationMs > 0 ? durationMs : lastLineMs(transcript)), transcript.getWordCount()), true);
         if (isOverlayFor(videoId)) {
-            mOverlay.setAnswerStatus("Finding the answer…", false);
+            mOverlay.setSummaryStatus(SUMMARY_STATUS, false);
         }
 
         final ClaudeClient.VideoInfo info = buildVideoInfo(videoId, durationMs);
@@ -277,7 +278,7 @@ public class DeclickbaitController extends BasePlayerController {
                     // Saved even if the overlay was closed, so the next press is instant and free.
                     DeclickbaitCache.put(getContext(), result);
                     if (isOverlayFor(videoId)) {
-                        mOverlay.setAnswerReady(result);
+                        mOverlay.showResult(result);
                     }
                 },
                 error -> {
@@ -343,7 +344,7 @@ public class DeclickbaitController extends BasePlayerController {
         dismissOverlay();
     }
 
-    // --- After the reveal: a "Key moments" row of chapter-style cards, and amber seekbar marks ---
+    // --- Once the result is shown: a "Key moments" row of chapter-style cards, and amber seekbar marks ---
 
     private void showMomentsRow(DeclickbaitResult result) {
         Video video = getVideo();
@@ -352,9 +353,6 @@ public class DeclickbaitController extends BasePlayerController {
         }
 
         List<Video> cards = new ArrayList<>();
-        if (result.isAnswerFound()) {
-            cards.add(card(video, result.answerAtMs, getContext().getString(R.string.declickbait_the_answer, result.answer)));
-        }
         for (DeclickbaitResult.Moment m : result.moments) {
             cards.add(card(video, m.ms, m.label));
         }
@@ -408,9 +406,6 @@ public class DeclickbaitController extends BasePlayerController {
         }
 
         long markMs = Math.max(durationMs / 250, 1500);
-        if (result.isAnswerFound()) {
-            segments.add(segment(result.answerAtMs, markMs, durationMs, MARKER_COLOR));
-        }
         for (DeclickbaitResult.Moment m : result.moments) {
             segments.add(segment(m.ms, markMs, durationMs, MARKER_COLOR));
         }

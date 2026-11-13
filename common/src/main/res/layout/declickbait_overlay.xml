@@ -1,26 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Full-screen wash over the paused video: guess first, then the answer and moments worth watching. -->
+<!-- Full-screen wash over the paused video: progress while Claude works, then the overview and the jump rail. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#E8070A0F"
-    android:paddingLeft="56dp"
-    android:paddingRight="56dp"
-    android:paddingTop="40dp"
-    android:paddingBottom="36dp">
+    android:background="#E8070A0F">
 
-    <!-- Guess / progress panel -->
+    <!-- Progress panel -->
     <LinearLayout
-        android:id="@+id/declickbait_guess_panel"
+        android:id="@+id/declickbait_progress_panel"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        android:paddingLeft="56dp"
+        android:paddingRight="56dp"
+        android:paddingTop="40dp"
+        android:paddingBottom="36dp">
 
         <TextView
-            android:id="@+id/declickbait_kicker"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/declickbait_kicker_guess"
+            android:text="@string/declickbait_title"
             android:textAllCaps="true"
             android:textColor="#FFF5B83D"
             android:textSize="14sp"
@@ -37,16 +36,6 @@
             android:textColor="#FFF3F4F6"
             android:textSize="30sp"
             android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/declickbait_prompt"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="22dp"
-            android:layout_marginRight="120dp"
-            android:text="@string/declickbait_prompt"
-            android:textColor="#FFF3F4F6"
-            android:textSize="22sp" />
 
         <LinearLayout
             android:layout_width="wrap_content"
@@ -105,21 +94,6 @@
             android:orientation="horizontal">
 
             <Button
-                android:id="@+id/declickbait_reveal"
-                android:layout_width="wrap_content"
-                android:layout_height="52dp"
-                android:layout_marginRight="14dp"
-                android:background="@drawable/declickbait_button_bg"
-                android:enabled="false"
-                android:paddingLeft="28dp"
-                android:paddingRight="28dp"
-                android:text="@string/declickbait_reveal"
-                android:textAllCaps="false"
-                android:textColor="@color/declickbait_button_text"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-
-            <Button
                 android:id="@+id/declickbait_settings"
                 android:layout_width="wrap_content"
                 android:layout_height="52dp"
@@ -141,7 +115,7 @@
                 android:background="@drawable/declickbait_button_bg"
                 android:paddingLeft="28dp"
                 android:paddingRight="28dp"
-                android:text="@string/declickbait_not_now"
+                android:text="@string/declickbait_close"
                 android:textAllCaps="false"
                 android:textColor="@color/declickbait_button_text"
                 android:textSize="18sp"
@@ -149,117 +123,94 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Answer panel -->
-    <LinearLayout
-        android:id="@+id/declickbait_answer_panel"
+    <!-- Result panel: the overview to read, and the rail of moments to jump to parked off the right edge -->
+    <FrameLayout
+        android:id="@+id/declickbait_result_panel"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="horizontal"
         android:visibility="gone">
 
-        <ScrollView
-            android:layout_width="0dp"
+        <!-- Right padding keeps the text clear of the part of the rail that peeks in. -->
+        <LinearLayout
+            android:id="@+id/declickbait_overview"
+            android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_marginRight="40dp"
-            android:layout_weight="1.25"
-            android:focusable="false"
-            android:scrollbars="none">
+            android:orientation="vertical"
+            android:paddingLeft="56dp"
+            android:paddingRight="196dp"
+            android:paddingTop="36dp"
+            android:paddingBottom="28dp">
 
-            <LinearLayout
+            <TextView
+                android:id="@+id/declickbait_headline"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical">
+                android:ellipsize="end"
+                android:maxLines="3"
+                android:textColor="#FFFFFFFF"
+                android:textSize="26sp"
+                android:textStyle="bold" />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/declickbait_kicker_answer"
-                    android:textAllCaps="true"
-                    android:textColor="#FFF5B83D"
-                    android:textSize="14sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/declickbait_answer"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:textColor="#FFFFFFFF"
-                    android:textSize="40sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/declickbait_answer_detail"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:textColor="#FFE5E7EB"
-                    android:textSize="20sp" />
+            <!-- Takes focus itself, so up and down scroll it; the fade shows there is more. -->
+            <ScrollView
+                android:id="@+id/declickbait_summary_scroll"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="12dp"
+                android:layout_weight="1"
+                android:fadingEdgeLength="28dp"
+                android:requiresFadingEdge="vertical"
+                android:scrollbars="none">
 
                 <TextView
                     android:id="@+id/declickbait_summary"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:lineSpacingMultiplier="1.2"
-                    android:textColor="#FFA3A8B3"
-                    android:textSize="17sp" />
+                    android:lineSpacingMultiplier="1.15"
+                    android:paddingBottom="16dp"
+                    android:textColor="#FFE5E7EB"
+                    android:textSize="16sp" />
+            </ScrollView>
+        </LinearLayout>
 
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:orientation="horizontal">
-
-                    <View
-                        android:layout_width="4dp"
-                        android:layout_height="match_parent"
-                        android:layout_marginRight="14dp"
-                        android:background="#FFF5B83D" />
-
-                    <TextView
-                        android:id="@+id/declickbait_title_check"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:lineSpacingMultiplier="1.15"
-                        android:paddingTop="4dp"
-                        android:paddingBottom="4dp"
-                        android:textColor="#FFF3F4F6"
-                        android:textSize="16sp" />
-                </LinearLayout>
-            </LinearLayout>
-        </ScrollView>
-
+        <!-- Laid out at the right edge and shifted mostly off screen by DeclickbaitOverlay until it has focus.
+             The wide right padding keeps the open rail inside the TV-safe area. -->
         <LinearLayout
-            android:layout_width="0dp"
+            android:id="@+id/declickbait_rail"
+            android:layout_width="420dp"
             android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="vertical">
+            android:layout_gravity="right"
+            android:background="@drawable/declickbait_rail_bg"
+            android:orientation="vertical"
+            android:paddingLeft="30dp"
+            android:paddingRight="48dp"
+            android:paddingTop="36dp"
+            android:paddingBottom="28dp">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/declickbait_kicker_moments"
+                android:text="@string/declickbait_rail_title"
                 android:textAllCaps="true"
                 android:textColor="#FFF5B83D"
-                android:textSize="14sp"
+                android:textSize="13sp"
                 android:textStyle="bold" />
 
-            <LinearLayout
-                android:id="@+id/declickbait_moments"
+            <ScrollView
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:orientation="vertical" />
+                android:layout_height="0dp"
+                android:layout_marginTop="10dp"
+                android:layout_weight="1"
+                android:fadingEdgeLength="28dp"
+                android:requiresFadingEdge="vertical"
+                android:scrollbars="none">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:text="@string/declickbait_keys_hint"
-                android:textColor="#FFA3A8B3"
-                android:textSize="13sp" />
+                <LinearLayout
+                    android:id="@+id/declickbait_moments"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+            </ScrollView>
         </LinearLayout>
-    </LinearLayout>
+    </FrameLayout>
 </FrameLayout>

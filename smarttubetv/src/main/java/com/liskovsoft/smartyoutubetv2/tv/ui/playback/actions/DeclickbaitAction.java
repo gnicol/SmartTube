@@ -6,7 +6,7 @@ import androidx.leanback.widget.Action;
 import com.liskovsoft.smartyoutubetv2.tv.R;
 
 /**
- * ✦ button: ask Claude for the answer a clickbait title is teasing. Long press opens its settings.
+ * ✦ button: ask Claude for the short version of the video and whether its title holds up. Long press opens its settings.
  */
 public class DeclickbaitAction extends Action {
     public DeclickbaitAction(Context context) {

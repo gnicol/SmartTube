@@ -31,7 +31,7 @@ public class DeclickbaitSettingsPresenter extends BasePresenter<Void> {
 
         appendKey(dialog);
         appendModels(dialog);
-        appendSwitches(dialog);
+        appendButtonSwitch(dialog);
         appendClear(dialog);
 
         dialog.showDialog(getContext().getString(R.string.declickbait_title));
@@ -66,7 +66,7 @@ public class DeclickbaitSettingsPresenter extends BasePresenter<Void> {
 
     private void appendModels(AppDialogPresenter dialog) {
         List<OptionItem> options = new ArrayList<>();
-        options.add(UiOptionItem.from("Claude Opus 5.5 · best answers, about 3¢ per video",
+        options.add(UiOptionItem.from("Claude Opus 5.5 · best summaries, about 3¢ per video",
                 option -> mPrefs.setModel(DeclickbaitPrefs.MODEL_OPUS),
                 DeclickbaitPrefs.MODEL_OPUS.equals(mPrefs.getModel())));
         options.add(UiOptionItem.from("Claude Haiku 5.5 · wordier, about 0.1¢ per video",
@@ -75,9 +75,7 @@ public class DeclickbaitSettingsPresenter extends BasePresenter<Void> {
         dialog.appendRadioCategory(getContext().getString(R.string.declickbait_settings_model), options);
     }
 
-    private void appendSwitches(AppDialogPresenter dialog) {
-        dialog.appendSingleSwitch(UiOptionItem.from(getContext().getString(R.string.declickbait_settings_guess_first),
-                option -> mPrefs.setGuessFirst(option.isSelected()), mPrefs.isGuessFirst()));
+    private void appendButtonSwitch(AppDialogPresenter dialog) {
         dialog.appendSingleSwitch(UiOptionItem.from(getContext().getString(R.string.declickbait_settings_button),
                 option -> mPrefs.setButtonEnabled(option.isSelected()), mPrefs.isButtonEnabled()));
     }
@@ -85,7 +83,7 @@ public class DeclickbaitSettingsPresenter extends BasePresenter<Void> {
     private void appendClear(AppDialogPresenter dialog) {
         dialog.appendSingleButton(UiOptionItem.from(getContext().getString(R.string.declickbait_settings_clear), option -> {
             DeclickbaitCache.clear(getContext());
-            MessageHelpers.showMessage(getContext(), "Saved answers cleared");
+            MessageHelpers.showMessage(getContext(), "Saved summaries cleared");
         }));
     }
 }

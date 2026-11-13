@@ -51,45 +51,59 @@ public class ClaudeClient {
         }
     }
 
-    static final String SYSTEM_PROMPT = "You help viewers get past clickbait on YouTube. You'll receive a video's title, "
-            + "channel, thumbnail, any chapters and description, and its timestamped transcript. The title usually teases a "
-            + "specific payoff (a food, a supplement, a rule) that the video holds back. Find that payoff in the transcript.\n\n"
-            + "- The viewer plays a guessing game before seeing your answer, so `tease` restates the question the title and "
-            + "thumbnail pose without hinting at the answer.\n"
-            + "- Thumbnail text is part of the tease and can narrow what the title means.\n"
-            + "- `answer` is the payoff itself in 2-6 words, with no explanation; put specifics in `answer_detail`.\n"
-            + "- Answer only from what the video actually says. If it never delivers, set `found` to not_found and say so in "
-            + "`title_check`.\n"
-            + "- `answer_at` and every moment's `at` must be copied exactly from a transcript line's [m:ss] stamp: the line where "
-            + "that point starts. For `answer_at`, use the line where the answer is first stated, not where it is teased.\n"
-            + "- `moments`: 1-3 other stretches genuinely worth watching, not including the answer itself. Labels of six words "
-            + "or fewer. Skip intros, recaps, sponsor reads and calls to subscribe.\n"
-            + "- Write plainly and briefly; this is read on a TV from the couch. Always write in English.";
+    static final String SYSTEM_PROMPT = "You save viewers from sitting through long YouTube videos. Many take a long time to "
+            + "reach the point, and many titles and thumbnails tease something the video holds back or never delivers. You'll "
+            + "receive a video's title, channel, thumbnail, any chapters and description, and its timestamped transcript. The "
+            + "viewer reads your reply on a TV, either instead of watching or to pick the parts worth watching.\n\n"
+            + "What the viewer most wants is whatever the title and thumbnail promised, so lead with that, then cover the rest "
+            + "of what is worth knowing.\n\n"
+            + "- `headline`: the short version. If the title or thumbnail teases a specific answer (a food, a supplement, a "
+            + "rule), that answer in 2-6 words. Otherwise the video's main takeaway in one sentence of 15 words or fewer. If "
+            + "the video never delivers what was promised, say that instead.\n"
+            + "- `summary`: the overview you would give a friend who asked what the video said. Start with what the title and "
+            + "thumbnail promised, with its specifics (names, amounts, doses, steps), then the other things worth knowing. "
+            + "State the content itself, not a description of the topic: \"Change the oil every 5,000 miles, not 3,000\", not "
+            + "\"Explains how often to change the oil\". Shape it to fit the video: a short paragraph or two, a bulleted list, "
+            + "or a few short sections, whichever conveys it best. Ideas that run through the whole video don't need to be "
+            + "tied to one moment. The headline is shown above it, so add to the headline rather than repeat it.\n"
+            + "- Let the content set the summary's length. 80 to 150 words suits most videos; one with more to give, such as "
+            + "a list of ten items or an interview longer than an hour, gets as many words as it takes to cover each item. "
+            + "Don't pad.\n"
+            + "- Formatting in `summary` is limited to what the TV can show: paragraphs separated by a blank line, `- ` "
+            + "bullets without nesting, `**bold**` for the few terms or numbers that matter most, and `## ` for a short "
+            + "section heading. No tables, links or numbered lists.\n"
+            + "- `moments`: the places worth jumping to, in time order: three to eight, or up to twelve for a video longer "
+            + "than an hour. One of them is where the title's promise is delivered; set `answers_title` true on that one only. "
+            + "Each `label` names the part in five words or fewer (\"Best magnesium form\", \"How the trial worked\"); it is "
+            + "shown on the seekbar and on small chapter cards, so it is a name, not a sentence. Each `at` must be copied "
+            + "exactly from a transcript line's [m:ss] stamp: the line where that part is first actually stated, not where it "
+            + "is teased or previewed.\n"
+            + "- Thumbnail text is part of the promise and can narrow what the title means.\n"
+            + "- `title_check` is a footnote shown after the summary: one sentence of 25 words or fewer on whether the video "
+            + "backs up the title and thumbnail, with the verdict in `title_supported`.\n"
+            + "- Report only what the video actually says. Leave out intros, recaps, sponsor reads and calls to subscribe.\n"
+            + "- Write plainly; this is read on a TV from the couch. Always write in English.";
 
     static JSONObject schema() throws JSONException {
         JSONObject moment = new JSONObject()
                 .put("type", "object")
                 .put("properties", new JSONObject()
-                        .put("at", str("m:ss copied from a transcript line."))
-                        .put("label", str("Six words or fewer.")))
-                .put("required", new JSONArray().put("at").put("label"))
+                        .put("at", str("m:ss copied from the transcript line where this part is first stated."))
+                        .put("label", str("Five words or fewer; a name, not a sentence."))
+                        .put("answers_title", new JSONObject().put("type", "boolean")))
+                .put("required", new JSONArray().put("at").put("label").put("answers_title"))
                 .put("additionalProperties", false);
 
         JSONObject props = new JSONObject()
-                .put("tease", str("The question the title and thumbnail pose, without revealing the answer. About 12 words."))
-                .put("answer", str("The payoff in 2-6 words."))
-                .put("answer_detail", str("One short line of specifics: names, forms, doses."))
-                .put("summary", str("2-3 sentences of the most useful nuance or caveats."))
-                .put("title_check", str("One sentence on whether the video supports the title and thumbnail claims."))
-                .put("answer_at", str("m:ss copied from the transcript line where the answer is first stated."))
-                .put("moments", new JSONObject().put("type", "array").put("items", moment))
-                .put("decoys", new JSONObject().put("type", "array").put("items", new JSONObject().put("type", "string"))
-                        .put("description", "Three plausible wrong answers for a multiple-choice guess, same style and length as `answer`."))
-                .put("found", new JSONObject().put("type", "string")
-                        .put("enum", new JSONArray().put("clear").put("partial").put("not_found")));
+                .put("headline", str("The answer the title teases in 2-6 words, or the main takeaway in 15 words or fewer."))
+                .put("summary", str("The overview, in the limited Markdown described."))
+                .put("moments", new JSONObject().put("type", "array").put("items", moment).put("description", "In time order."))
+                .put("title_check", str("One sentence, 25 words or fewer, on whether the video supports the title and thumbnail claims."))
+                .put("title_supported", new JSONObject().put("type", "string")
+                        .put("enum", new JSONArray().put("yes").put("partly").put("no")));
 
         JSONArray required = new JSONArray();
-        for (String key : new String[] {"tease", "answer", "answer_detail", "summary", "title_check", "answer_at", "moments", "decoys", "found"}) {
+        for (String key : new String[] {"headline", "summary", "moments", "title_check", "title_supported"}) {
             required.put(key);
         }
 
