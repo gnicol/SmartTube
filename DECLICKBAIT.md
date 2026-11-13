@@ -83,6 +83,15 @@ git submodule update --init --recursive
 adb install -r smarttubetv/build/outputs/apk/ststable/declick/SmartTube_stable_*_armeabi-v7a.apk
 ```
 
+On Fire OS 6 (the bedroom Fire TV Stick 4K, Android 7.1), `adb install` of a ~27 MB APK crashed the stick's
+network ADB until ADB Debugging was toggled off and on. Copy first instead, or use Downloader with the
+release URL (`.../releases/download/latest-declick/smarttube_declick_armeabi-v7a.apk`):
+
+```sh
+adb push smarttube_declick_armeabi-v7a.apk /data/local/tmp/declick.apk
+adb shell pm install -r /data/local/tmp/declick.apk
+```
+
 `declick/arm64-protoc.init.gradle` is only for Apple Silicon Macs without Rosetta: upstream's protoc
 3.17.3 "osx-aarch_64" artifact is really x86_64, so local builds use protobuf 3.21.12 instead.
 CI on Linux builds with upstream's 3.17.3.

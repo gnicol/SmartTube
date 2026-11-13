@@ -2,7 +2,9 @@ package com.liskovsoft.smartyoutubetv2.common.declickbait;
 
 import androidx.annotation.Nullable;
 
+import com.liskovsoft.googlecommon.common.helpers.DefaultHeaders;
 import com.liskovsoft.mediaserviceinterfaces.data.MediaSubtitle;
+import com.liskovsoft.sharedutils.mylogger.Log;
 import com.liskovsoft.sharedutils.okhttp.OkHttpManager;
 
 import org.json.JSONArray;
@@ -10,6 +12,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -24,6 +27,7 @@ import okhttp3.ResponseBody;
  * (they carry the PO token), asking YouTube for json3 and falling back to the WebVTT it serves by default.
  */
 public class TranscriptFetcher {
+    private static final String TAG = TranscriptFetcher.class.getSimpleName();
     private static final Pattern VTT_TIME = Pattern.compile("^(\\d+:)?(\\d{2}):(\\d{2})\\.(\\d{3})\\s+-->");
     private static final Pattern VTT_TAG = Pattern.compile("<[^>]+>");
 
@@ -31,8 +35,16 @@ public class TranscriptFetcher {
     @Nullable
     public static String pickUrl(@Nullable List<MediaSubtitle> subtitles) {
         if (subtitles == null || subtitles.isEmpty()) {
+            Log.w(TAG, "no caption tracks");
             return null;
         }
+
+        StringBuilder tracks = new StringBuilder();
+        for (MediaSubtitle sub : subtitles) {
+            tracks.append(sub.getLanguageCode()).append('/').append(sub.getVssId()).append('/').append(sub.getType())
+                    .append(sub.getBaseUrl() == null ? "(no url)" : "").append(' ');
+        }
+        Log.w(TAG, "caption tracks: %s", tracks);
 
         MediaSubtitle manualEn = null;
         MediaSubtitle autoEn = null;
@@ -68,19 +80,74 @@ public class TranscriptFetcher {
         return null;
     }
 
-    /** Blocking. Returns null when the captions can't be read. */
-    @Nullable
-    public static Transcript fetch(String baseUrl) {
-        OkHttpClient client = OkHttpManager.instance().getClient();
+    /** Why the captions couldn't be read, short enough to show on the TV. */
+    public static class FetchException extends Exception {
+        FetchException(String reason) {
+            super(reason);
+        }
+    }
 
-        String json3Url = withFormat(baseUrl, "json3");
-        Transcript transcript = parseJson3(download(client, json3Url));
-        if (transcript != null && !transcript.isEmpty()) {
-            return transcript;
+    /**
+     * Blocking. Tries json3 then WebVTT (what the player uses) on the URL as given, then the same without the
+     * PO token: older devices can get a token YouTube rejects, while the signed URL works without one.
+     */
+    public static Transcript fetch(String baseUrl) throws FetchException {
+        OkHttpClient client = OkHttpManager.instance().getClient();
+        List<String> bases = new ArrayList<>();
+        bases.add(baseUrl);
+        String noToken = withoutParams(baseUrl, "pot", "c");
+        if (!noToken.equals(baseUrl)) {
+            bases.add(noToken);
         }
 
-        transcript = parseVtt(download(client, withFormat(baseUrl, "vtt")));
-        return transcript != null && !transcript.isEmpty() ? transcript : null;
+        String reason = "no response";
+        for (String base : bases) {
+            for (String fmt : new String[] {"json3", "vtt"}) {
+                Download d = downloadWithRetry(client, withFormat(base, fmt));
+                if (d.text == null) {
+                    reason = d.reason;
+                    continue;
+                }
+                Transcript t = "json3".equals(fmt) ? parseJson3(d.text) : parseVtt(d.text);
+                if (t != null && !t.isEmpty()) {
+                    return t;
+                }
+                reason = d.text.trim().isEmpty() ? "empty response" : "unreadable response";
+            }
+        }
+        throw new FetchException(reason);
+    }
+
+    static String withoutParams(String url, String... names) {
+        String result = url;
+        for (String name : names) {
+            result = result.replaceAll("([?&])" + name + "=[^&]*&?", "$1");
+        }
+        return result.replaceAll("[?&]$", "");
+    }
+
+    private static class Download {
+        final String text;
+        final String reason;
+
+        Download(String text, String reason) {
+            this.text = text;
+            this.reason = reason;
+        }
+    }
+
+    /** One retry after a short pause for rate limiting and server errors. */
+    private static Download downloadWithRetry(OkHttpClient client, String url) {
+        Download d = download(client, url);
+        if (d.text == null && d.reason != null && (d.reason.equals("HTTP 429") || d.reason.startsWith("HTTP 5"))) {
+            try {
+                Thread.sleep(1500);
+            } catch (InterruptedException e) {
+                return d;
+            }
+            d = download(client, url);
+        }
+        return d;
     }
 
     static String withFormat(String url, String fmt) {
@@ -90,18 +157,39 @@ public class TranscriptFetcher {
         return url + (url.contains("?") ? "&" : "?") + "fmt=" + fmt;
     }
 
-    @Nullable
-    private static String download(OkHttpClient client, String url) {
-        Request request = new Request.Builder().url(url).get().build();
+    private static Download download(OkHttpClient client, String url) {
+        // Same User-Agent the player uses for media and subtitle requests.
+        Request request = new Request.Builder().url(url).header("User-Agent", DefaultHeaders.APP_USER_AGENT).get().build();
         try (Response response = client.newCall(request).execute()) {
             ResponseBody body = response.body();
-            if (!response.isSuccessful() || body == null) {
-                return null;
-            }
-            return body.string();
+            String text = body != null ? body.string() : null;
+            Log.w(TAG, "captions %s -> HTTP %s, %s chars, starts: %s", describe(url), response.code(),
+                    text != null ? text.length() : -1,
+                    text != null ? text.substring(0, Math.min(80, text.length())).replace('\n', ' ') : "");
+            return response.isSuccessful() ? new Download(text, null) : new Download(null, "HTTP " + response.code());
         } catch (IOException e) {
-            return null;
+            Log.w(TAG, "captions %s -> %s", describe(url), e);
+            return new Download(null, e.getClass().getSimpleName());
         }
+    }
+
+    /** Host, path and parameter names only (values include signatures and tokens). */
+    private static String describe(String url) {
+        int q = url.indexOf('?');
+        if (q < 0) {
+            return url;
+        }
+        StringBuilder sb = new StringBuilder(url.substring(0, q)).append(" [");
+        for (String pair : url.substring(q + 1).split("&")) {
+            int eq = pair.indexOf('=');
+            String name = eq >= 0 ? pair.substring(0, eq) : pair;
+            sb.append(name);
+            if (name.equals("fmt") || name.equals("lang") || name.equals("kind") || name.equals("c") || name.equals("tlang")) {
+                sb.append('=').append(eq >= 0 ? pair.substring(eq + 1) : "");
+            }
+            sb.append(' ');
+        }
+        return sb.append(']').toString();
     }
 
     @Nullable
